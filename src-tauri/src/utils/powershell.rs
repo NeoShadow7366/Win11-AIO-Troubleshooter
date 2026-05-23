@@ -1,10 +1,13 @@
+use std::os::windows::process::CommandExt;
 use std::process::Command;
 
 /// Execute a PowerShell script and return stdout as a String.
 /// Uses -NoProfile -NonInteractive for clean, non-interactive execution.
+/// CREATE_NO_WINDOW prevents console windows from flashing on screen.
 pub fn run_powershell(script: &str) -> Result<String, String> {
     let output = Command::new("powershell.exe")
         .args(["-NoProfile", "-NonInteractive", "-Command", script])
+        .creation_flags(0x08000000) // CREATE_NO_WINDOW
         .output()
         .map_err(|e| format!("Failed to launch PowerShell: {}", e))?;
 
