@@ -1,0 +1,122 @@
+use serde::Serialize;
+use sysinfo::System;
+
+use crate::commands::event_logs::EventLogEntry;
+use crate::commands::processes::ProcessInfo;
+use crate::utils::powershell::run_powershell;
+
+#[derive(Debug, Serialize, Clone)]
+pub struct AppInsightResult {
+    pub processes: Vec<ProcessInfo>,
+    pub event_logs: Vec<EventLogEntry>,
+    pub exe_path: Option<String>,
+}
+
+/// Provides combined insight into an application: matching running processes and
+/// related event log entries. Also reports the executable path if found.
+#[tauri::command]
+pub async fn get_app_insights(name: String) -> Result<AppInsightResult, String> {
+    let name_clone = name.clone();
+
+    tokio::task::spawn_blocking(move || {
+        // --- Find matching processes ---
+        let mut sys = System::new();
+        sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+
+        let search_lower = name_clone.to_lowercase();
+
+        let mut exe_path: Option<String> = None;
+        let mut processes: Vec<ProcessInfo> = Vec::new();
+
+        for p in sys.processes().values() {
+            let proc_name = p.name().to_string_lossy().to_string();
+            if proc_name.to_lowercase().contains(&search_lower) && p.memory() > 0 {
+                // Capture the exe path from the first matching process
+                if exe_path.is_none() {
+                    if let Some(path) = p.exe() {
+                        exe_path = Some(path.to_string_lossy().to_string());
+                    }
+                }
+
+                let status_str = match p.status() {
+                    sysinfo::ProcessStatus::Run => "Running",
+                    sysinfo::ProcessStatus::Sleep => "Sleeping",
+                    sysinfo::ProcessStatus::Stop => "Stopped",
+                    sysinfo::ProcessStatus::Zombie => "Zombie",
+                    _ => "Unknown",
+                };
+
+                processes.push(ProcessInfo {
+                    pid: p.pid().as_u32(),
+                    name: proc_name,
+                    cpu_usage: p.cpu_usage(),
+                    memory_mb: p.memory() as f64 / (1024.0 * 1024.0),
+                    status: status_str.to_string(),
+                });
+            }
+        }
+
+        processes.sort_by(|a, b| {
+            b.memory_mb
+                .partial_cmp(&a.memory_mb)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        // --- Find matching event log entries ---
+        let sanitized = name_clone.replace('\'', "''").replace('*', "");
+        let script = format!(
+            r#"
+            try {{
+                $events = Get-WinEvent -FilterHashtable @{{LogName='Application'; Level=2,3}} -MaxEvents 200 -ErrorAction Stop |
+                    Where-Object {{ $_.ProviderName -like '*{search}*' -or $_.Message -like '*{search}*' }} |
+                    Select-Object -First 30
+                $events | ForEach-Object {{
+                    [PSCustomObject]@{{
+                        TimeCreated = $_.TimeCreated.ToString('yyyy-MM-dd HH:mm:ss')
+                        Level = switch ($_.Level) {{
+                            2 {{ 'Error' }}
+                            3 {{ 'Warning' }}
+                            default {{ 'Info' }}
+                        }}
+                        Source = $_.ProviderName
+                        Message = if ($_.Message.Length -gt 500) {{ $_.Message.Substring(0, 500) + '...' }} else {{ $_.Message }}
+                        EventId = $_.Id
+                    }}
+                }} | ConvertTo-Json -Depth 3
+            }} catch {{
+                if ($_.Exception.Message -like '*No events were found*') {{
+                    Write-Output '[]'
+                }} else {{
+                    throw $_
+                }}
+            }}
+            "#,
+            search = sanitized,
+        );
+
+        let event_logs: Vec<EventLogEntry> = match run_powershell(&script) {
+            Ok(raw) if !raw.is_empty() && raw != "[]" => {
+                serde_json::from_str(&raw)
+                    .or_else(|_| {
+                        serde_json::from_str::<serde_json::Value>(&raw)
+                            .map(|v| vec![v])
+                            .and_then(|arr| {
+                                serde_json::from_value(serde_json::Value::Array(arr))
+                            })
+                    })
+                    .unwrap_or_default()
+            }
+            _ => vec![],
+        };
+
+        Ok(AppInsightResult {
+            processes,
+            event_logs,
+            exe_path,
+        })
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+}
