@@ -16,6 +16,8 @@ pub fn run() {
             commands::services::get_services,
             commands::services::start_service,
             commands::services::stop_service,
+            commands::services::restart_service,
+            commands::services::get_service_insights,
             // Event logs
             commands::event_logs::get_event_logs,
             // App insights

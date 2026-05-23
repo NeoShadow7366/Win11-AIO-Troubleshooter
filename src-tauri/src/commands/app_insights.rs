@@ -10,6 +10,8 @@ pub struct AppInsightResult {
     pub processes: Vec<ProcessInfo>,
     pub event_logs: Vec<EventLogEntry>,
     pub exe_path: Option<String>,
+    pub install_directory: Option<String>,
+    pub appdata_directory: Option<String>,
 }
 
 /// Provides combined insight into an application: matching running processes and
@@ -111,12 +113,47 @@ pub async fn get_app_insights(name: String) -> Result<AppInsightResult, String> 
             _ => vec![],
         };
 
+        // --- Find installation and appdata directories ---
+        let install_directory = find_app_directory(&search_lower, &[
+            r"C:\Program Files",
+            r"C:\Program Files (x86)",
+        ]);
+
+        let appdata_directory = {
+            let appdata_base = std::env::var("APPDATA").unwrap_or_default();
+            let local_appdata = std::env::var("LOCALAPPDATA").unwrap_or_default();
+            find_app_directory(&search_lower, &[&appdata_base, &local_appdata])
+        };
+
         Ok(AppInsightResult {
             processes,
             event_logs,
             exe_path,
+            install_directory,
+            appdata_directory,
         })
     })
     .await
     .map_err(|e| format!("Task join error: {}", e))?
+}
+
+/// Search directories for a subdirectory whose name contains the search term.
+fn find_app_directory(search_lower: &str, base_dirs: &[&str]) -> Option<String> {
+    for base in base_dirs {
+        let base_path = std::path::Path::new(base);
+        if !base_path.is_dir() {
+            continue;
+        }
+        if let Ok(entries) = std::fs::read_dir(base_path) {
+            for entry in entries.flatten() {
+                if entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
+                    let dir_name = entry.file_name().to_string_lossy().to_lowercase();
+                    if dir_name.contains(search_lower) {
+                        return Some(entry.path().to_string_lossy().to_string());
+                    }
+                }
+            }
+        }
+    }
+    None
 }

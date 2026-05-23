@@ -5,6 +5,7 @@ import {
   Play,
   Square,
   RefreshCw,
+  RotateCw,
   CheckCircle2,
   XCircle,
   X,
@@ -65,10 +66,10 @@ export default function ServicesManager() {
     fetchServices();
   }, [fetchServices]);
 
-  const handleAction = async (service: ServiceInfo, action: "start" | "stop") => {
+  const handleAction = async (service: ServiceInfo, action: "start" | "stop" | "restart") => {
     setActionLoading(service.name);
     try {
-      const cmd = action === "start" ? "start_service" : "stop_service";
+      const cmd = action === "start" ? "start_service" : action === "stop" ? "stop_service" : "restart_service";
       const result = await invoke<string>(cmd, { name: service.name });
       addToast("success", result);
       await fetchServices();
@@ -151,9 +152,9 @@ export default function ServicesManager() {
                         text-[11px] font-semibold text-white/40 uppercase tracking-wider">
           <span className="w-[200px]">Name</span>
           <span className="flex-1">Display Name</span>
-          <span className="w-[100px]">Status</span>
+          <span className="w-[90px]">Status</span>
           <span className="w-[120px]">Startup</span>
-          <span className="w-[90px] text-right">Actions</span>
+          <span className="w-[130px] text-right">Actions</span>
         </div>
 
         {/* Body */}
@@ -202,24 +203,40 @@ export default function ServicesManager() {
                   <span className="w-[120px] text-white/40 text-[12px] truncate">
                     {svc.start_type}
                   </span>
-                  <div className="w-[90px] flex justify-end">
+                  <div className="w-[130px] flex justify-end gap-1">
                     {isRunning ? (
-                      <button
-                        id={`stop-${svc.name}`}
-                        onClick={() => handleAction(svc, "stop")}
-                        disabled={isActioning}
-                        className="flex items-center gap-1 h-7 px-2.5 rounded-md text-[11px] font-medium
-                                   bg-danger/10 text-danger/80 hover:bg-danger/20 hover:text-danger
-                                   disabled:opacity-40 transition-all duration-200 border border-danger/20"
-                        title="Stop service"
-                      >
-                        {isActioning ? (
-                          <RefreshCw className="w-3 h-3 animate-spin" />
-                        ) : (
-                          <Square className="w-3 h-3" />
-                        )}
-                        Stop
-                      </button>
+                      <>
+                        <button
+                          id={`restart-${svc.name}`}
+                          onClick={() => handleAction(svc, "restart")}
+                          disabled={isActioning}
+                          className="flex items-center gap-1 h-7 px-2 rounded-md text-[11px] font-medium
+                                     bg-accent/10 text-accent/80 hover:bg-accent/20 hover:text-accent
+                                     disabled:opacity-40 transition-all duration-200 border border-accent/20"
+                          title="Restart service"
+                        >
+                          {isActioning ? (
+                            <RefreshCw className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <RotateCw className="w-3 h-3" />
+                          )}
+                        </button>
+                        <button
+                          id={`stop-${svc.name}`}
+                          onClick={() => handleAction(svc, "stop")}
+                          disabled={isActioning}
+                          className="flex items-center gap-1 h-7 px-2 rounded-md text-[11px] font-medium
+                                     bg-danger/10 text-danger/80 hover:bg-danger/20 hover:text-danger
+                                     disabled:opacity-40 transition-all duration-200 border border-danger/20"
+                          title="Stop service"
+                        >
+                          {isActioning ? (
+                            <RefreshCw className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <Square className="w-3 h-3" />
+                          )}
+                        </button>
+                      </>
                     ) : (
                       <button
                         id={`start-${svc.name}`}

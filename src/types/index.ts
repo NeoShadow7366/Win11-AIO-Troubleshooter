@@ -45,12 +45,22 @@ export interface EventLogEntry {
   message: string;
 }
 
+export interface ServiceInsightResult {
+  executable_path: string | null;
+  description: string | null;
+  start_mode: string | null;
+  state: string | null;
+  process_id: number | null;
+}
+
 // ─── App Insights ───
 
 export interface AppInsightResult {
   processes: ProcessInfo[];
   event_logs: EventLogEntry[];
   exe_path: string | null;
+  install_directory: string | null;
+  appdata_directory: string | null;
 }
 
 // ─── BSOD ───

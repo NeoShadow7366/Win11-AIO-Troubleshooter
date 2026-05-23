@@ -136,3 +136,79 @@ pub async fn stop_service(name: String) -> Result<String, String> {
     .await
     .map_err(|e| format!("Task join error: {}", e))?
 }
+
+/// Restart a Windows service by name (stop then start). Blocked for critical system services.
+#[tauri::command]
+pub async fn restart_service(name: String) -> Result<String, String> {
+    if is_critical_service(&name) {
+        return Err(format!(
+            "Service '{}' is a critical system service and cannot be modified through this tool.",
+            name
+        ));
+    }
+
+    tokio::task::spawn_blocking(move || {
+        let sanitized = name.replace('\'', "''");
+        let script = format!("Restart-Service -Name '{}' -Force", sanitized);
+        run_powershell(&script)?;
+        Ok(format!("Service '{}' restarted successfully.", name))
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+}
+
+/// Get detailed insights for a specific Windows service: executable path and description.
+#[tauri::command]
+pub async fn get_service_insights(service_id: String) -> Result<ServiceInsightResult, String> {
+    tokio::task::spawn_blocking(move || {
+        let sanitized = service_id.replace('\'', "''");
+        let script = format!(
+            r#"$svc = Get-WmiObject Win32_Service -Filter "Name='{}'"
+if ($svc) {{
+    [PSCustomObject]@{{
+        PathName = $svc.PathName
+        Description = $svc.Description
+        StartMode = $svc.StartMode
+        State = $svc.State
+        ProcessId = $svc.ProcessId
+    }} | ConvertTo-Json -Depth 3
+}} else {{
+    Write-Output '{{}}'
+}}"#,
+            sanitized
+        );
+
+        let raw = run_powershell(&script)?;
+        if raw.is_empty() || raw == "{}" {
+            return Ok(ServiceInsightResult {
+                executable_path: None,
+                description: None,
+                start_mode: None,
+                state: None,
+                process_id: None,
+            });
+        }
+
+        let parsed: serde_json::Value =
+            serde_json::from_str(&raw).map_err(|e| format!("JSON parse error: {}", e))?;
+
+        Ok(ServiceInsightResult {
+            executable_path: parsed.get("PathName").and_then(|v| v.as_str()).map(String::from),
+            description: parsed.get("Description").and_then(|v| v.as_str()).map(String::from),
+            start_mode: parsed.get("StartMode").and_then(|v| v.as_str()).map(String::from),
+            state: parsed.get("State").and_then(|v| v.as_str()).map(String::from),
+            process_id: parsed.get("ProcessId").and_then(|v| v.as_u64()).map(|n| n as u32),
+        })
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct ServiceInsightResult {
+    pub executable_path: Option<String>,
+    pub description: Option<String>,
+    pub start_mode: Option<String>,
+    pub state: Option<String>,
+    pub process_id: Option<u32>,
+}

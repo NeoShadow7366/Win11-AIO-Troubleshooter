@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Search, Loader2, Inbox } from "lucide-react";
+import { Search, Loader2, Inbox, FolderOpen } from "lucide-react";
 import type { AppInsightResult } from "../types";
 
 export default function AppInsights() {
@@ -19,7 +19,7 @@ export default function AppInsights() {
       setResult(data);
     } catch (err) {
       console.error("App insights error:", err);
-      setResult({ processes: [], event_logs: [], exe_path: null });
+      setResult({ processes: [], event_logs: [], exe_path: null, install_directory: null, appdata_directory: null });
     } finally {
       setLoading(false);
     }
@@ -92,7 +92,34 @@ export default function AppInsights() {
         </div>
       ) : (
         /* Results Panels */
-        <div className="flex-1 grid grid-cols-2 gap-4 min-h-0">
+        <div className="flex-1 flex flex-col gap-4 min-h-0 overflow-y-auto">
+          {/* Directory Info Bar */}
+          {(result?.exe_path || result?.install_directory || result?.appdata_directory) && (
+            <div className="glass-panel p-3 flex flex-wrap gap-x-6 gap-y-2 shrink-0">
+              {result.exe_path && (
+                <div className="flex items-center gap-2 min-w-0">
+                  <FolderOpen className="w-3.5 h-3.5 text-accent/60 shrink-0" />
+                  <span className="text-[10px] text-white/30 uppercase font-semibold shrink-0">Exe Path</span>
+                  <span className="text-[11.5px] text-white/60 font-mono truncate">{result.exe_path}</span>
+                </div>
+              )}
+              {result.install_directory && (
+                <div className="flex items-center gap-2 min-w-0">
+                  <FolderOpen className="w-3.5 h-3.5 text-success/60 shrink-0" />
+                  <span className="text-[10px] text-white/30 uppercase font-semibold shrink-0">Install Dir</span>
+                  <span className="text-[11.5px] text-white/60 font-mono truncate">{result.install_directory}</span>
+                </div>
+              )}
+              {result.appdata_directory && (
+                <div className="flex items-center gap-2 min-w-0">
+                  <FolderOpen className="w-3.5 h-3.5 text-warning/60 shrink-0" />
+                  <span className="text-[10px] text-white/30 uppercase font-semibold shrink-0">AppData</span>
+                  <span className="text-[11.5px] text-white/60 font-mono truncate">{result.appdata_directory}</span>
+                </div>
+              )}
+            </div>
+          )}
+          <div className="flex-1 grid grid-cols-2 gap-4 min-h-0">
           {/* Left: Processes */}
           <div className="glass-panel flex flex-col overflow-hidden">
             <div className="flex items-center justify-between px-4 h-10 border-b border-white/[0.06] bg-white/[0.02] shrink-0">
@@ -182,6 +209,7 @@ export default function AppInsights() {
                 </div>
               )}
             </div>
+          </div>
           </div>
         </div>
       )}
