@@ -1,8 +1,34 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Search, Loader2, Inbox, FolderOpen, Star, X, ExternalLink } from "lucide-react";
-import type { AppInsightResult, FavoriteItem } from "../types";
+import { open } from "@tauri-apps/plugin-shell";
+import {
+  Search,
+  Loader2,
+  Inbox,
+  FolderOpen,
+  Star,
+  X,
+  ExternalLink,
+  RefreshCw,
+  ChevronRight,
+  Info,
+  FileText,
+  Cpu,
+  Hash,
+} from "lucide-react";
+import type { AppInsightResult, FavoriteItem, ProcessInfo } from "../types";
+import { useNavigate } from "./Layout";
 
+/* ─── Types ─── */
+interface AppGroup {
+  name: string;
+  count: number;
+  totalMemory: number;
+  totalCpu: number;
+  pids: number[];
+}
+
+/* ─── Helpers ─── */
 const openPath = async (path: string) => {
   try {
     await invoke("open_path_in_explorer", { path });
@@ -11,326 +37,447 @@ const openPath = async (path: string) => {
   }
 };
 
+function groupProcesses(processes: ProcessInfo[]): AppGroup[] {
+  const map = new Map<string, AppGroup>();
+  for (const p of processes) {
+    // Strip .exe suffix for grouping
+    const baseName = p.name.replace(/\.exe$/i, "");
+    const existing = map.get(baseName);
+    if (existing) {
+      existing.count++;
+      existing.totalMemory += p.memory_mb;
+      existing.totalCpu += p.cpu_usage;
+      existing.pids.push(p.pid);
+    } else {
+      map.set(baseName, {
+        name: baseName,
+        count: 1,
+        totalMemory: p.memory_mb,
+        totalCpu: p.cpu_usage,
+        pids: [p.pid],
+      });
+    }
+  }
+  return Array.from(map.values()).sort((a, b) => b.totalMemory - a.totalMemory);
+}
+
+/* ─── Component ─── */
 export default function AppInsights() {
-  const [query, setQuery] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<AppInsightResult | null>(null);
-  const [searched, setSearched] = useState(false);
+  const [allProcesses, setAllProcesses] = useState<ProcessInfo[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
 
   // Favorites
   const [favorites, setFavorites] = useState<FavoriteItem[]>([]);
 
-  // Info panel
-  const [selectedFav, setSelectedFav] = useState<FavoriteItem | null>(null);
-  const [favResult, setFavResult] = useState<AppInsightResult | null>(null);
-  const [favLoading, setFavLoading] = useState(false);
+  // Detail panel
+  const [selectedApp, setSelectedApp] = useState<string | null>(null);
+  const [insightData, setInsightData] = useState<AppInsightResult | null>(null);
+  const [insightLoading, setInsightLoading] = useState(false);
+  const navigate = useNavigate();
 
-  const fetchFavorites = useCallback(async () => {
+  const fetchProcesses = useCallback(async () => {
+    setLoading(true);
     try {
-      const favs = await invoke<FavoriteItem[]>("get_favorites");
+      const [procs, favs] = await Promise.all([
+        invoke<ProcessInfo[]>("get_processes"),
+        invoke<FavoriteItem[]>("get_favorites"),
+      ]);
+      setAllProcesses(procs.filter((p) => p.memory_mb > 0));
       setFavorites(favs.filter((f) => f.item_type === "process"));
     } catch (err) {
-      console.error("Favorites fetch error:", err);
+      console.error("Fetch error:", err);
+    } finally {
+      setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    fetchFavorites();
-  }, [fetchFavorites]);
+    fetchProcesses();
+  }, [fetchProcesses]);
 
-  const handleSearch = async () => {
-    const trimmed = query.trim();
-    if (!trimmed) return;
-    setLoading(true);
-    setSearched(true);
-    setSelectedFav(null);
-    setFavResult(null);
-    try {
-      const data = await invoke<AppInsightResult>("get_app_insights", { name: trimmed });
-      setResult(data);
-    } catch (err) {
-      console.error("App insights error:", err);
-      setResult({ processes: [], event_logs: [], exe_path: null, install_directory: null, appdata_directory: null });
-    } finally {
-      setLoading(false);
-    }
-  };
+  // Group and filter
+  const groups = useMemo(() => groupProcesses(allProcesses), [allProcesses]);
 
-  const handleFavSelect = async (fav: FavoriteItem) => {
-    if (selectedFav?.name === fav.name) {
-      setSelectedFav(null);
-      setFavResult(null);
+  const filtered = useMemo(() => {
+    if (!search.trim()) return groups;
+    const q = search.toLowerCase();
+    return groups.filter((g) => g.name.toLowerCase().includes(q));
+  }, [groups, search]);
+
+  const isFavorite = (name: string) => favorites.some((f) => f.name.toLowerCase() === name.toLowerCase());
+  const favGroups = useMemo(() => groups.filter((g) => isFavorite(g.name)), [groups, favorites]);
+
+  const handleSelect = async (appName: string) => {
+    if (selectedApp === appName) {
+      setSelectedApp(null);
+      setInsightData(null);
       return;
     }
-    setSelectedFav(fav);
-    setFavLoading(true);
-    setFavResult(null);
+    setSelectedApp(appName);
+    setInsightLoading(true);
+    setInsightData(null);
     try {
-      const data = await invoke<AppInsightResult>("get_app_insights", { name: fav.name });
-      setFavResult(data);
+      const data = await invoke<AppInsightResult>("get_app_insights", { name: appName });
+      setInsightData(data);
     } catch (err) {
-      console.error("Fav insight error:", err);
+      console.error("App insight error:", err);
     } finally {
-      setFavLoading(false);
+      setInsightLoading(false);
     }
   };
 
-  const removeFavorite = async (name: string) => {
+  const handleToggleFavorite = async (name: string) => {
     try {
-      await invoke("remove_favorite", { itemType: "process", name });
-      await fetchFavorites();
-      if (selectedFav?.name === name) {
-        setSelectedFav(null);
-        setFavResult(null);
+      if (isFavorite(name)) {
+        await invoke("remove_favorite", { itemType: "process", name });
+      } else {
+        await invoke("add_favorite", { itemType: "process", name, displayName: name, path: null });
       }
+      const favs = await invoke<FavoriteItem[]>("get_favorites");
+      setFavorites(favs.filter((f) => f.item_type === "process"));
     } catch (err) {
-      console.error("Remove favorite error:", err);
+      console.error("Favorite error:", err);
+    }
+  };
+
+  const handleWhatIsThis = async (name: string) => {
+    const query = encodeURIComponent(`What is ${name} process Windows`);
+    try {
+      await open(`https://www.google.com/search?q=${query}`);
+    } catch (err) {
+      console.error("Open URL error:", err);
     }
   };
 
   const levelBadge = (lvl: string) => {
     const lower = lvl.toLowerCase();
-    if (lower.includes("error") || lower.includes("critical"))
-      return "bg-danger/15 text-danger";
-    if (lower.includes("warning"))
-      return "bg-warning/15 text-warning";
+    if (lower.includes("error") || lower.includes("critical")) return "bg-danger/15 text-danger";
+    if (lower.includes("warning")) return "bg-warning/15 text-warning";
     return "bg-white/10 text-white/50";
   };
 
-  // Show either search result or favorite insight result
-  const activeResult = selectedFav ? favResult : result;
-  const activeLoading = selectedFav ? favLoading : loading;
-
   return (
     <div className="flex flex-col gap-5 h-full animate-fade-in">
-      {/* Favorited Processes Section */}
-      {favorites.length > 0 && (
-        <section>
-          <h2 className="text-[11px] font-semibold text-white/30 uppercase tracking-[0.12em] mb-3 px-1 flex items-center gap-2">
-            <Star className="w-3.5 h-3.5 text-warning fill-warning" />
-            Favorited Processes
-          </h2>
-          <div className="flex flex-wrap gap-2">
-            {favorites.map((fav) => (
-              <button
-                key={fav.name}
-                onClick={() => handleFavSelect(fav)}
-                className={`flex items-center gap-2 h-9 px-3.5 rounded-lg text-[12.5px] font-medium
-                           transition-all duration-200 border group
-                           ${selectedFav?.name === fav.name
-                             ? "border-accent/30 bg-accent/10 text-accent"
-                             : "border-white/10 bg-white/[0.03] text-white/70 hover:bg-white/[0.06]"
-                           }`}
-              >
-                <Star className="w-3 h-3 text-warning fill-warning shrink-0" />
-                {fav.display_name || fav.name}
-                <button
-                  onClick={(e) => { e.stopPropagation(); removeFavorite(fav.name); }}
-                  className="w-4 h-4 flex items-center justify-center rounded text-white/20
-                             hover:text-danger hover:bg-danger/10 transition-all ml-1 opacity-0
-                             group-hover:opacity-100"
-                >
-                  <X className="w-3 h-3" />
-                </button>
-              </button>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* Search Bar */}
+      {/* Toolbar */}
       <div className="flex items-center gap-3">
         <div className="relative flex-1 max-w-lg">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30" />
           <input
-            id="insights-search"
+            id="app-insights-search"
             type="text"
-            placeholder="Enter application or service name (e.g. svchost, chrome)..."
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+            placeholder="Filter applications..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
             className="glass-input w-full h-10 pl-9 pr-3 text-[13px]"
           />
         </div>
+        <span className="text-[12px] text-white/30 font-mono">
+          {filtered.length} apps
+        </span>
         <button
-          id="insights-search-btn"
-          onClick={handleSearch}
-          disabled={loading || !query.trim()}
-          className="flex items-center gap-2 h-10 px-5 rounded-lg text-[13px] font-medium
-                     bg-accent/90 text-black hover:bg-accent disabled:opacity-40
-                     transition-all duration-200"
+          onClick={fetchProcesses}
+          className="flex items-center justify-center w-9 h-9 rounded-lg
+                     bg-white/[0.04] border border-white/10 text-white/50
+                     hover:bg-white/[0.07] hover:text-white/80 transition-all duration-200"
+          title="Refresh"
         >
-          {loading ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
-          ) : (
-            <Search className="w-4 h-4" />
-          )}
-          Search
+          <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
         </button>
       </div>
 
-      {/* Results */}
-      {!searched && !selectedFav ? (
-        /* Empty State */
-        <div className="flex-1 flex flex-col items-center justify-center gap-4 text-center">
-          <div className="flex items-center justify-center w-16 h-16 rounded-2xl
-                          bg-accent/10 text-accent/60">
-            <Search className="w-8 h-8" />
-          </div>
-          <div>
-            <h3 className="text-[15px] font-semibold text-white/70 mb-1">
-              Search for Application Insights
-            </h3>
-            <p className="text-[13px] text-white/35 max-w-md leading-relaxed">
-              Enter an application or service name to find correlated processes
-              and related event log entries. This helps diagnose issues by connecting
-              runtime data with system events.
-              {favorites.length > 0 && " Or click a favorited process above."}
-            </p>
-          </div>
-        </div>
-      ) : activeLoading ? (
+      {loading ? (
         <div className="flex-1 flex items-center justify-center">
           <Loader2 className="w-8 h-8 text-accent animate-spin" />
         </div>
       ) : (
-        /* Results Panels */
-        <div className="flex-1 flex flex-col gap-4 min-h-0 overflow-y-auto">
-          {/* Directory Info Bar */}
-          {(activeResult?.exe_path || activeResult?.install_directory || activeResult?.appdata_directory) && (
-            <div className="glass-panel p-3 flex flex-wrap gap-x-6 gap-y-2 shrink-0">
-              {activeResult.exe_path && (
-                <button
-                  onClick={() => openPath(activeResult.exe_path!)}
-                  className="flex items-center gap-2 min-w-0 group/path cursor-pointer hover:bg-white/[0.04] rounded-lg px-2 py-1.5 -mx-2 transition-all duration-200"
-                  title="Open in File Explorer"
-                >
-                  <FolderOpen className="w-3.5 h-3.5 text-accent/60 shrink-0 group-hover/path:text-accent" />
-                  <span className="text-[10px] text-white/30 uppercase font-semibold shrink-0">Exe Path</span>
-                  <span className="text-[11.5px] text-white/60 font-mono truncate group-hover/path:text-white/80">{activeResult.exe_path}</span>
-                  <ExternalLink className="w-3 h-3 text-white/0 group-hover/path:text-white/40 shrink-0 transition-colors" />
-                </button>
-              )}
-              {activeResult.install_directory && (
-                <button
-                  onClick={() => openPath(activeResult.install_directory!)}
-                  className="flex items-center gap-2 min-w-0 group/path cursor-pointer hover:bg-white/[0.04] rounded-lg px-2 py-1.5 -mx-2 transition-all duration-200"
-                  title="Open in File Explorer"
-                >
-                  <FolderOpen className="w-3.5 h-3.5 text-success/60 shrink-0 group-hover/path:text-success" />
-                  <span className="text-[10px] text-white/30 uppercase font-semibold shrink-0">Install Dir</span>
-                  <span className="text-[11.5px] text-white/60 font-mono truncate group-hover/path:text-white/80">{activeResult.install_directory}</span>
-                  <ExternalLink className="w-3 h-3 text-white/0 group-hover/path:text-white/40 shrink-0 transition-colors" />
-                </button>
-              )}
-              {activeResult.appdata_directory && (
-                <button
-                  onClick={() => openPath(activeResult.appdata_directory!)}
-                  className="flex items-center gap-2 min-w-0 group/path cursor-pointer hover:bg-white/[0.04] rounded-lg px-2 py-1.5 -mx-2 transition-all duration-200"
-                  title="Open in File Explorer"
-                >
-                  <FolderOpen className="w-3.5 h-3.5 text-warning/60 shrink-0 group-hover/path:text-warning" />
-                  <span className="text-[10px] text-white/30 uppercase font-semibold shrink-0">AppData</span>
-                  <span className="text-[11.5px] text-white/60 font-mono truncate group-hover/path:text-white/80">{activeResult.appdata_directory}</span>
-                  <ExternalLink className="w-3 h-3 text-white/0 group-hover/path:text-white/40 shrink-0 transition-colors" />
-                </button>
-              )}
-            </div>
-          )}
-          <div className="flex-1 grid grid-cols-2 gap-4 min-h-0">
-          {/* Left: Processes */}
-          <div className="glass-panel flex flex-col overflow-hidden">
-            <div className="flex items-center justify-between px-4 h-10 border-b border-white/[0.06] bg-white/[0.02] shrink-0">
-              <span className="text-[11px] font-semibold text-white/40 uppercase tracking-wider">
-                Matching Processes
-              </span>
-              <span className="text-[11px] text-white/25 font-mono">
-                {activeResult?.processes.length || 0}
-              </span>
-            </div>
-            <div className="flex-1 overflow-y-auto">
-              {!activeResult || activeResult.processes.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-full gap-2 text-white/25">
-                  <Inbox className="w-6 h-6" />
-                  <span className="text-[12px]">No matching processes</span>
+        <div className="flex flex-1 gap-4 min-h-0">
+          {/* App List */}
+          <div className={`flex flex-col gap-4 overflow-y-auto transition-all duration-300 ${
+            selectedApp ? "flex-1 min-w-0" : "w-full"
+          }`}>
+            {/* Favorites Section */}
+            {favGroups.length > 0 && (
+              <section>
+                <h2 className="text-[11px] font-semibold text-white/30 uppercase tracking-[0.12em] mb-3 px-1 flex items-center gap-2">
+                  <Star className="w-3.5 h-3.5 text-warning fill-warning" />
+                  Favorited Apps
+                </h2>
+                <div className="grid grid-cols-2 gap-3">
+                  {favGroups.map((group) => (
+                    <AppCard
+                      key={group.name}
+                      group={group}
+                      isSelected={selectedApp === group.name}
+                      isFav={true}
+                      onSelect={() => handleSelect(group.name)}
+                      onToggleFav={() => handleToggleFavorite(group.name)}
+                    />
+                  ))}
                 </div>
-              ) : (
-                <table className="w-full">
-                  <thead className="sticky top-0 bg-[#0e0e1a]/90 backdrop-blur-sm">
-                    <tr className="text-[10px] font-semibold text-white/30 uppercase tracking-wider">
-                      <th className="text-left px-3 py-2">PID</th>
-                      <th className="text-left px-3 py-2">Name</th>
-                      <th className="text-right px-3 py-2">CPU%</th>
-                      <th className="text-right px-3 py-2">Mem MB</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {activeResult.processes.map((p) => (
-                      <tr
-                        key={p.pid}
-                        className="text-[12.5px] border-b border-white/[0.03] hover:bg-white/[0.04]
-                                   transition-colors"
-                      >
-                        <td className="px-3 py-2 text-white/50 font-mono">{p.pid}</td>
-                        <td className="px-3 py-2 text-white/80 truncate max-w-[200px]">{p.name}</td>
-                        <td className="px-3 py-2 text-right text-white/60 font-mono tabular-nums">
-                          {p.cpu_usage.toFixed(1)}
-                        </td>
-                        <td className="px-3 py-2 text-right text-white/60 font-mono tabular-nums">
-                          {p.memory_mb.toFixed(1)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          </div>
+              </section>
+            )}
 
-          {/* Right: Event Logs */}
-          <div className="glass-panel flex flex-col overflow-hidden">
-            <div className="flex items-center justify-between px-4 h-10 border-b border-white/[0.06] bg-white/[0.02] shrink-0">
-              <span className="text-[11px] font-semibold text-white/40 uppercase tracking-wider">
-                Related Event Logs
-              </span>
-              <span className="text-[11px] text-white/25 font-mono">
-                {activeResult?.event_logs.length || 0}
-              </span>
-            </div>
-            <div className="flex-1 overflow-y-auto">
-              {!activeResult || activeResult.event_logs.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-full gap-2 text-white/25">
-                  <Inbox className="w-6 h-6" />
-                  <span className="text-[12px]">No related events</span>
+            {/* All Apps */}
+            <section>
+              <h2 className="text-[11px] font-semibold text-white/30 uppercase tracking-[0.12em] mb-3 px-1">
+                All Applications ({filtered.length})
+              </h2>
+              {filtered.length === 0 ? (
+                <div className="flex flex-col items-center justify-center gap-3 py-12 text-white/25">
+                  <Inbox className="w-8 h-8" />
+                  <span className="text-[13px]">No matching applications</span>
                 </div>
               ) : (
-                <div className="flex flex-col">
-                  {activeResult.event_logs.map((log, i) => (
-                    <div
-                      key={i}
-                      className="flex flex-col gap-1 px-4 py-2.5 border-b border-white/[0.03]
-                                 hover:bg-white/[0.03] transition-colors"
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className={`inline-flex items-center h-4 px-1.5 rounded text-[9px] font-bold ${levelBadge(log.level)}`}>
-                          {log.level}
-                        </span>
-                        <span className="text-[11px] text-white/35 font-mono">{log.time_created}</span>
-                        <span className="text-[11px] text-white/25">·</span>
-                        <span className="text-[11px] text-white/40">{log.source}</span>
-                      </div>
-                      <p className="text-[12px] text-white/65 leading-relaxed line-clamp-2">
-                        {log.message}
-                      </p>
-                    </div>
+                <div className="grid grid-cols-2 gap-3">
+                  {filtered.map((group) => (
+                    <AppCard
+                      key={group.name}
+                      group={group}
+                      isSelected={selectedApp === group.name}
+                      isFav={isFavorite(group.name)}
+                      onSelect={() => handleSelect(group.name)}
+                      onToggleFav={() => handleToggleFavorite(group.name)}
+                    />
                   ))}
                 </div>
               )}
+            </section>
+          </div>
+
+          {/* Detail Panel */}
+          {selectedApp && (
+            <div className="w-[400px] min-w-[400px] glass-panel-strong flex flex-col overflow-hidden animate-slide-in">
+              {/* Header */}
+              <div className="flex items-center justify-between px-4 h-11 border-b border-white/[0.06] shrink-0">
+                <div className="flex items-center gap-2">
+                  <Info className="w-4 h-4 text-accent" />
+                  <span className="text-[13px] font-semibold text-white/90">App Details</span>
+                </div>
+                <button
+                  onClick={() => { setSelectedApp(null); setInsightData(null); }}
+                  className="flex items-center justify-center w-7 h-7 rounded-md
+                             text-white/30 hover:text-white/70 hover:bg-white/[0.06]
+                             transition-all duration-200"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              {/* Content */}
+              <div className="flex-1 overflow-y-auto p-4">
+                {/* App Identity */}
+                <div className="mb-4">
+                  <h3 className="text-[15px] font-semibold text-white/90 mb-1">{selectedApp}</h3>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => handleWhatIsThis(selectedApp)}
+                      className="flex items-center gap-1.5 h-7 px-3 rounded-md text-[11px] font-medium
+                                 bg-accent/10 text-accent/80 hover:bg-accent/20 hover:text-accent
+                                 transition-all duration-200 border border-accent/20"
+                    >
+                      <ExternalLink className="w-3 h-3" />
+                      What is this?
+                    </button>
+                    <button
+                      onClick={() => handleToggleFavorite(selectedApp)}
+                      className={`flex items-center gap-1.5 h-7 px-3 rounded-md text-[11px] font-medium
+                                 transition-all duration-200 border
+                                 ${isFavorite(selectedApp)
+                                   ? "bg-warning/10 text-warning border-warning/20"
+                                   : "bg-white/[0.04] text-white/50 border-white/10 hover:text-warning"
+                                 }`}
+                    >
+                      <Star className={`w-3 h-3 ${isFavorite(selectedApp) ? "fill-warning" : ""}`} />
+                      {isFavorite(selectedApp) ? "Favorited" : "Favorite"}
+                    </button>
+                    <button
+                      onClick={() => navigate("processes")}
+                      className="flex items-center gap-1.5 h-7 px-3 rounded-md text-[11px] font-medium
+                                 bg-white/[0.04] text-white/50 border border-white/10
+                                 hover:bg-white/[0.08] hover:text-white/80 transition-all duration-200"
+                    >
+                      <Cpu className="w-3 h-3" />
+                      View in Processes
+                    </button>
+                  </div>
+                </div>
+
+                {insightLoading ? (
+                  <div className="flex flex-col gap-3">
+                    {Array.from({ length: 4 }).map((_, i) => (
+                      <div key={i} className="h-12 shimmer rounded-lg" />
+                    ))}
+                  </div>
+                ) : insightData ? (
+                  <div className="flex flex-col gap-4">
+                    {/* Paths */}
+                    {(insightData.exe_path || insightData.install_directory || insightData.appdata_directory) && (
+                      <div className="flex flex-col gap-2">
+                        {insightData.exe_path && (
+                          <button
+                            onClick={() => openPath(insightData.exe_path!)}
+                            className="flex items-center gap-2 group/p text-left px-2.5 py-2 rounded-lg
+                                       bg-white/[0.02] hover:bg-white/[0.05] border border-white/[0.05] transition-all"
+                          >
+                            <FolderOpen className="w-3.5 h-3.5 text-accent/60 shrink-0 group-hover/p:text-accent" />
+                            <div className="flex flex-col min-w-0 flex-1">
+                              <span className="text-[9px] text-white/25 uppercase font-semibold">Exe Path</span>
+                              <span className="text-[11px] text-white/60 font-mono truncate group-hover/p:text-white/80">
+                                {insightData.exe_path}
+                              </span>
+                            </div>
+                            <ExternalLink className="w-3 h-3 text-white/0 group-hover/p:text-white/30 shrink-0" />
+                          </button>
+                        )}
+                        {insightData.install_directory && (
+                          <button
+                            onClick={() => openPath(insightData.install_directory!)}
+                            className="flex items-center gap-2 group/p text-left px-2.5 py-2 rounded-lg
+                                       bg-white/[0.02] hover:bg-white/[0.05] border border-white/[0.05] transition-all"
+                          >
+                            <FolderOpen className="w-3.5 h-3.5 text-success/60 shrink-0 group-hover/p:text-success" />
+                            <div className="flex flex-col min-w-0 flex-1">
+                              <span className="text-[9px] text-white/25 uppercase font-semibold">Install Dir</span>
+                              <span className="text-[11px] text-white/60 font-mono truncate group-hover/p:text-white/80">
+                                {insightData.install_directory}
+                              </span>
+                            </div>
+                            <ExternalLink className="w-3 h-3 text-white/0 group-hover/p:text-white/30 shrink-0" />
+                          </button>
+                        )}
+                        {insightData.appdata_directory && (
+                          <button
+                            onClick={() => openPath(insightData.appdata_directory!)}
+                            className="flex items-center gap-2 group/p text-left px-2.5 py-2 rounded-lg
+                                       bg-white/[0.02] hover:bg-white/[0.05] border border-white/[0.05] transition-all"
+                          >
+                            <FolderOpen className="w-3.5 h-3.5 text-warning/60 shrink-0 group-hover/p:text-warning" />
+                            <div className="flex flex-col min-w-0 flex-1">
+                              <span className="text-[9px] text-white/25 uppercase font-semibold">AppData</span>
+                              <span className="text-[11px] text-white/60 font-mono truncate group-hover/p:text-white/80">
+                                {insightData.appdata_directory}
+                              </span>
+                            </div>
+                            <ExternalLink className="w-3 h-3 text-white/0 group-hover/p:text-white/30 shrink-0" />
+                          </button>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Processes */}
+                    <div>
+                      <h4 className="text-[11px] font-semibold text-white/30 uppercase tracking-wider mb-2 flex items-center gap-2">
+                        <Cpu className="w-3.5 h-3.5" />
+                        Matching Processes ({insightData.processes.length})
+                      </h4>
+                      {insightData.processes.length > 0 ? (
+                        <div className="flex flex-col gap-1">
+                          {insightData.processes.map((p) => (
+                            <div key={p.pid} className="flex items-center justify-between px-3 py-2 rounded-lg bg-white/[0.02] border border-white/[0.04]">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <Hash className="w-3 h-3 text-white/20 shrink-0" />
+                                <span className="text-[12px] text-white/50 font-mono">{p.pid}</span>
+                                <span className="text-[12px] text-white/75 truncate">{p.name}</span>
+                              </div>
+                              <div className="flex items-center gap-3 text-[11px] font-mono text-white/40 shrink-0">
+                                <span>{p.cpu_usage.toFixed(1)}%</span>
+                                <span>{p.memory_mb.toFixed(1)} MB</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-center py-4 text-white/25 text-[12px]">
+                          No running processes
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Event Logs */}
+                    <div>
+                      <h4 className="text-[11px] font-semibold text-white/30 uppercase tracking-wider mb-2 flex items-center gap-2">
+                        <FileText className="w-3.5 h-3.5" />
+                        Related Events ({insightData.event_logs.length})
+                      </h4>
+                      {insightData.event_logs.length > 0 ? (
+                        <div className="flex flex-col gap-1">
+                          {insightData.event_logs.map((log, i) => (
+                            <div key={i} className="flex flex-col gap-1 px-3 py-2 rounded-lg bg-white/[0.02] border border-white/[0.04]">
+                              <div className="flex items-center gap-2">
+                                <span className={`inline-flex items-center h-4 px-1.5 rounded text-[9px] font-bold ${levelBadge(log.level)}`}>
+                                  {log.level}
+                                </span>
+                                <span className="text-[11px] text-white/35 font-mono">{log.time_created}</span>
+                              </div>
+                              <p className="text-[11px] text-white/60 leading-relaxed line-clamp-2">{log.message}</p>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-center py-4 text-white/25 text-[12px]">
+                          No related events
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
             </div>
-          </div>
-          </div>
+          )}
         </div>
       )}
+    </div>
+  );
+}
+
+/* ─── App Card ─── */
+function AppCard({
+  group,
+  isSelected,
+  isFav,
+  onSelect,
+  onToggleFav,
+}: {
+  group: AppGroup;
+  isSelected: boolean;
+  isFav: boolean;
+  onSelect: () => void;
+  onToggleFav: () => void;
+}) {
+  return (
+    <div
+      onClick={onSelect}
+      className={`glass-panel p-3.5 cursor-pointer transition-all duration-300 group
+                 ${isSelected ? "border-accent/30 bg-accent/[0.04]" : "hover:bg-white/[0.05]"}`}
+    >
+      <div className="flex items-start justify-between mb-2">
+        <div className="flex flex-col min-w-0 flex-1">
+          <span className="text-[13px] font-semibold text-white/85 truncate">{group.name}</span>
+          <span className="text-[11px] text-white/35">
+            {group.count} process{group.count !== 1 ? "es" : ""}
+          </span>
+        </div>
+        <div className="flex items-center gap-1 shrink-0 ml-2">
+          <button
+            onClick={(e) => { e.stopPropagation(); onToggleFav(); }}
+            className={`flex items-center justify-center w-6 h-6 rounded
+                       transition-all duration-200
+                       ${isFav ? "text-warning" : "text-white/15 hover:text-warning/60"}`}
+          >
+            <Star className={`w-3.5 h-3.5 ${isFav ? "fill-warning" : ""}`} />
+          </button>
+          <ChevronRight className="w-3.5 h-3.5 text-white/15" />
+        </div>
+      </div>
+      <div className="flex items-center gap-3">
+        <span className="text-[11px] text-white/40 font-mono tabular-nums">
+          {group.totalMemory.toFixed(0)} MB
+        </span>
+        <span className="text-[11px] text-white/30 font-mono tabular-nums">
+          {group.totalCpu.toFixed(1)}% CPU
+        </span>
+      </div>
     </div>
   );
 }

@@ -296,8 +296,8 @@ pub async fn get_bsod_history() -> Result<Vec<BsodRecord>, String> {
             .map(|raw| BsodRecord {
                 date: raw.date.unwrap_or_else(|| "Unknown".to_string()),
                 bugcheck_code: raw.bugcheck_code.unwrap_or_else(|| "Unknown".to_string()),
-                description: raw.description.unwrap_or_else(|| String::new()),
-                parameters: raw.parameters.unwrap_or_else(|| String::new()),
+                description: raw.description.unwrap_or_default(),
+                parameters: raw.parameters.unwrap_or_default(),
             })
             .collect();
 

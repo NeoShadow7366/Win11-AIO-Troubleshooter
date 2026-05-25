@@ -1,7 +1,194 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Monitor, Cpu, HardDrive, Server, Clock, Globe, Wifi, Copy, Check } from "lucide-react";
+import {
+  Monitor, Cpu, HardDrive, Server, Clock, Globe, Wifi, Copy, Check,
+  Heart, Shield, AlertTriangle, RefreshCw, MemoryStick, Rocket, ChevronRight,
+} from "lucide-react";
 import type { SystemStats, SystemSpecs, DiskInfo } from "../types";
+
+/* ─── Health Score Types ─── */
+interface HealthCategory {
+  name: string;
+  score: number;
+  icon: string;
+  status: string;
+  detail: string;
+  action: string | null;
+}
+
+interface SystemHealthScore {
+  overall_score: number;
+  overall_status: string;
+  categories: HealthCategory[];
+}
+
+/* ─── Icon Mapper ─── */
+const ICON_MAP: Record<string, React.ReactNode> = {
+  HardDrive: <HardDrive className="w-3.5 h-3.5" />,
+  MemoryStick: <MemoryStick className="w-3.5 h-3.5" />,
+  RefreshCw: <RefreshCw className="w-3.5 h-3.5" />,
+  Rocket: <Rocket className="w-3.5 h-3.5" />,
+  Clock: <Clock className="w-3.5 h-3.5" />,
+  AlertTriangle: <AlertTriangle className="w-3.5 h-3.5" />,
+  Shield: <Shield className="w-3.5 h-3.5" />,
+};
+
+function getIcon(name: string) {
+  return ICON_MAP[name] || <Heart className="w-3.5 h-3.5" />;
+}
+
+/* ─── Sparkline Component ─── */
+function Sparkline({ data, color, max, label, unit }: {
+  data: number[];
+  color: string;
+  max: number;
+  label: string;
+  unit: string;
+}) {
+  const width = 280;
+  const height = 48;
+  const latest = data.length > 0 ? data[data.length - 1] : 0;
+  const effectiveMax = max > 0 ? max : 100;
+
+  const points = data.map((v, i) => {
+    const x = (i / Math.max(data.length - 1, 1)) * width;
+    const y = height - (Math.min(v / effectiveMax, 1) * (height - 4)) - 2;
+    return `${x},${y}`;
+  }).join(" ");
+
+  const fillPoints = data.length > 0
+    ? `0,${height} ${points} ${width},${height}`
+    : "";
+
+  return (
+    <div className="glass-panel p-3 hover:bg-white/[0.05] transition-all duration-300 group">
+      <div className="flex items-center justify-between mb-1.5">
+        <span className="text-[11px] text-white/40 font-medium">{label}</span>
+        <span className="text-[13px] font-bold tabular-nums" style={{ color }}>
+          {latest.toFixed(1)}{unit}
+        </span>
+      </div>
+      <svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
+        {/* Fill area */}
+        {fillPoints && (
+          <polygon
+            points={fillPoints}
+            fill={`${color}15`}
+          />
+        )}
+        {/* Line */}
+        {data.length > 1 && (
+          <polyline
+            points={points}
+            fill="none"
+            stroke={color}
+            strokeWidth="1.5"
+            strokeLinejoin="round"
+            strokeLinecap="round"
+            style={{ filter: `drop-shadow(0 0 4px ${color}40)` }}
+          />
+        )}
+      </svg>
+    </div>
+  );
+}
+
+/* ─── Health Score Card ─── */
+function HealthScoreCard({ score }: { score: SystemHealthScore | null }) {
+  if (!score) {
+    return (
+      <div className="glass-panel p-5 flex items-center gap-4">
+        <div className="w-[72px] h-[72px] rounded-full shimmer" />
+        <div className="flex flex-col gap-2 flex-1">
+          <div className="h-4 w-40 shimmer" />
+          <div className="h-3 w-56 shimmer" />
+        </div>
+      </div>
+    );
+  }
+
+  const scoreColor =
+    score.overall_score >= 80 ? "#2ed573" :
+    score.overall_score >= 60 ? "#ffa502" : "#ff4757";
+
+  const radius = 30;
+  const circumference = 2 * Math.PI * radius;
+  const offset = circumference - (score.overall_score / 100) * circumference;
+
+  return (
+    <div className="glass-panel p-5 hover:bg-white/[0.05] transition-all duration-300">
+      <div className="flex items-center gap-5">
+        {/* Score ring */}
+        <div className="relative w-[72px] h-[72px] shrink-0">
+          <svg className="w-full h-full -rotate-90" viewBox="0 0 72 72">
+            <circle cx="36" cy="36" r={radius} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="5" />
+            <circle
+              cx="36" cy="36" r={radius}
+              fill="none" stroke={scoreColor} strokeWidth="5"
+              strokeLinecap="round"
+              strokeDasharray={circumference}
+              strokeDashoffset={offset}
+              style={{
+                transition: "stroke-dashoffset 1s cubic-bezier(0.4,0,0.2,1), stroke 0.5s ease",
+                filter: `drop-shadow(0 0 6px ${scoreColor}40)`,
+              }}
+            />
+          </svg>
+          <div className="absolute inset-0 flex flex-col items-center justify-center">
+            <span className="text-[18px] font-bold tabular-nums" style={{ color: scoreColor }}>
+              {score.overall_score}
+            </span>
+          </div>
+        </div>
+
+        {/* Details */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-2">
+            <Heart className="w-4 h-4" style={{ color: scoreColor }} />
+            <span className="text-[14px] font-semibold text-white/85">System Health</span>
+            <span className="text-[11px] px-2 py-0.5 rounded-full font-medium capitalize"
+                  style={{ backgroundColor: `${scoreColor}15`, color: scoreColor }}>
+              {score.overall_status}
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-x-4 gap-y-1">
+            {score.categories.map((cat) => {
+              const catColor = cat.status === "good" ? "#2ed573" :
+                               cat.status === "warning" ? "#ffa502" : "#ff4757";
+              return (
+                <div key={cat.name} className="flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: catColor }} />
+                  <span className="text-[10.5px] text-white/40">{cat.name}</span>
+                  <span className="text-[10.5px] font-bold tabular-nums" style={{ color: catColor }}>
+                    {cat.score}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* Category details (warnings/critical only) */}
+      {score.categories.filter(c => c.status !== "good").length > 0 && (
+        <div className="mt-3 pt-3 border-t border-white/[0.05] flex flex-col gap-1.5">
+          {score.categories.filter(c => c.status !== "good").map((cat) => (
+            <div key={cat.name} className="flex items-center gap-2 text-[11px]">
+              <span className="text-white/25">{getIcon(cat.icon)}</span>
+              <span className="text-white/50">{cat.detail}</span>
+              {cat.action && (
+                <>
+                  <ChevronRight className="w-3 h-3 text-white/15" />
+                  <span className="text-accent/60">{cat.action}</span>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 /* ─── Circular Gauge ─── */
 interface GaugeProps {
@@ -259,7 +446,13 @@ export default function Dashboard() {
   const [stats, setStats] = useState<SystemStats | null>(null);
   const [specs, setSpecs] = useState<SystemSpecs | null>(null);
   const [loading, setLoading] = useState(true);
+  const [healthScore, setHealthScore] = useState<SystemHealthScore | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Performance history (60-second rolling window)
+  const MAX_POINTS = 30;
+  const [cpuHistory, setCpuHistory] = useState<number[]>([]);
+  const [ramHistory, setRamHistory] = useState<number[]>([]);
 
   const fetchData = useCallback(async () => {
     try {
@@ -269,11 +462,25 @@ export default function Dashboard() {
       ]);
       setStats(s);
       setSpecs(sp);
+
+      // Update history
+      setCpuHistory((prev) => [...prev.slice(-(MAX_POINTS - 1)), s.cpu_usage]);
+      setRamHistory((prev) => {
+        const pct = s.ram_total > 0 ? (s.ram_used / s.ram_total) * 100 : 0;
+        return [...prev.slice(-(MAX_POINTS - 1)), pct];
+      });
     } catch (err) {
       console.error("Dashboard fetch error:", err);
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  // Fetch health score once on mount (it's expensive)
+  useEffect(() => {
+    invoke<SystemHealthScore>("get_health_score")
+      .then(setHealthScore)
+      .catch((err) => console.error("Health score error:", err));
   }, []);
 
   useEffect(() => {
@@ -286,6 +493,14 @@ export default function Dashboard() {
 
   return (
     <div className="flex flex-col gap-6 animate-fade-in">
+      {/* Health Score */}
+      <section>
+        <h2 className="text-[11px] font-semibold text-white/30 uppercase tracking-[0.12em] mb-3 px-1">
+          System Health
+        </h2>
+        <HealthScoreCard score={healthScore} />
+      </section>
+
       {/* System Gauges */}
       <section>
         <h2 className="text-[11px] font-semibold text-white/30 uppercase tracking-[0.12em] mb-3 px-1">
@@ -322,6 +537,19 @@ export default function Dashboard() {
           )}
       </div>
       </section>
+
+      {/* Performance Sparklines */}
+      {cpuHistory.length > 2 && (
+        <section>
+          <h2 className="text-[11px] font-semibold text-white/30 uppercase tracking-[0.12em] mb-3 px-1">
+            Performance History
+          </h2>
+          <div className="grid grid-cols-2 gap-3">
+            <Sparkline data={cpuHistory} color="#60CDFF" max={100} label="CPU Usage" unit="%" />
+            <Sparkline data={ramHistory} color="#2ed573" max={100} label="Memory Usage" unit="%" />
+          </div>
+        </section>
+      )}
 
       {/* Network IPs */}
       {stats && (

@@ -22,7 +22,11 @@ fn get_tool_command(tool_id: &str) -> Option<(&str, Vec<&str>)> {
             "cmd",
             vec!["/C", "DISM", "/Online", "/Cleanup-Image", "/RestoreHealth"],
         )),
-        "chkdsk" => Some(("cmd", vec!["/C", "chkdsk", "C:", "/f"])),
+        "chkdsk" => Some((
+            "powershell",
+            vec!["-NoProfile", "-Command",
+                 "Write-Host 'Running Check Disk on C: drive...'; Write-Host 'If the drive is in use, it will be scheduled for next restart.'; Write-Host ''; $proc = Start-Process -FilePath 'chkdsk.exe' -ArgumentList 'C:', '/f' -NoNewWindow -PassThru -Wait -RedirectStandardInput (New-Item -Path $env:TEMP\\chkdsk_input.txt -Value 'Y' -Force).FullName 2>&1; Write-Host ''; Write-Host 'Check Disk complete. If scheduled, it will run on next restart.'"],
+        )),
         "component_cleanup" => Some((
             "cmd",
             vec!["/C", "DISM", "/Online", "/Cleanup-Image", "/StartComponentCleanup"],
@@ -48,6 +52,11 @@ fn get_tool_command(tool_id: &str) -> Option<(&str, Vec<&str>)> {
 
         // ─── Performance ───
         "disk_cleanup" => Some(("cmd", vec!["/C", "cleanmgr", "/sagerun:1"])),
+        "empty_recycle" => Some((
+            "powershell",
+            vec!["-NoProfile", "-Command",
+                 "$shell = New-Object -ComObject Shell.Application; $bin = $shell.Namespace(0xA); $count = $bin.Items().Count; $size = ($bin.Items() | Measure-Object -Property Size -Sum -ErrorAction SilentlyContinue).Sum; if ($count -eq 0) { Write-Host 'Recycle Bin is already empty.' } else { Write-Host \"Recycle Bin contains $count item(s)\"; Clear-RecycleBin -Force -ErrorAction SilentlyContinue; if ($?) { $freed = [math]::Round($size / 1MB, 2); Write-Host \"Recycle Bin emptied. Freed approximately $freed MB.\" } else { Write-Host 'Failed to empty Recycle Bin.' } }"],
+        )),
         "clear_temp" => Some((
             "powershell",
             vec!["-NoProfile", "-Command",

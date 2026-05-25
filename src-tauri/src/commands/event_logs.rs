@@ -104,7 +104,7 @@ pub async fn get_event_logs(
                 time_created: raw.time_created.unwrap_or_else(|| "Unknown".to_string()),
                 level: raw.level.unwrap_or_else(|| "Unknown".to_string()),
                 source: raw.source.unwrap_or_else(|| "Unknown".to_string()),
-                message: raw.message.unwrap_or_else(|| String::new()),
+                message: raw.message.unwrap_or_default(),
                 event_id: raw.event_id.unwrap_or(0),
             })
             .collect();

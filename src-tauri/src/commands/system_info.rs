@@ -145,7 +145,7 @@ pub async fn get_system_specs() -> Result<SystemSpecs, String> {
         let os_version = format!(
             "{} {}",
             System::name().unwrap_or_else(|| "Unknown OS".to_string()),
-            System::os_version().unwrap_or_else(|| String::new()),
+            System::os_version().unwrap_or_default(),
         );
 
         // Hostname

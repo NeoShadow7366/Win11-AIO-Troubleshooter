@@ -77,7 +77,6 @@ body {
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  user-select: none;
 }
 
 /* ─── Custom Scrollbar ─── */
@@ -181,3 +180,72 @@ body {
 .terminal-output .stdout { color: #2ed573; }
 .terminal-output .stderr { color: #ff4757; }
 .terminal-output .info   { color: rgba(255,255,255,0.5); }
+
+/* ─── Selectable Content ─── */
+/* Only disable selection on interactive chrome, not content areas */
+button, nav, [data-tauri-drag-region], .sidebar-nav {
+  user-select: none;
+}
+
+/* Ensure content text IS selectable */
+.terminal-output,
+pre, code,
+table td, table th,
+.glass-panel p,
+.glass-panel span {
+  user-select: text;
+  cursor: text;
+}
+
+/* ─── Resizable Terminal ─── */
+.terminal-resizable {
+  resize: vertical;
+  overflow: hidden;
+  min-height: 150px;
+  max-height: 80vh;
+}
+
+.terminal-resizable::-webkit-resizer {
+  display: none;
+}
+
+/* Custom resize handle */
+.terminal-resize-handle {
+  height: 6px;
+  cursor: ns-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  transition: background 0.15s ease;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  flex-shrink: 0;
+}
+
+.terminal-resize-handle:hover {
+  background: rgba(96, 205, 255, 0.08);
+  border-top-color: rgba(96, 205, 255, 0.2);
+}
+
+.terminal-resize-handle::after {
+  content: '';
+  width: 32px;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.1);
+  transition: background 0.15s ease;
+}
+
+.terminal-resize-handle:hover::after {
+  background: rgba(96, 205, 255, 0.3);
+}
+
+/* ─── Responsive ─── */
+@media (max-height: 700px) {
+  .glass-panel { border-radius: 8px; }
+  .terminal-resizable { min-height: 120px; }
+}
+
+@media (max-width: 900px) {
+  .glass-panel { border-radius: 8px; }
+}

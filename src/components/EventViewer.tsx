@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   Search,
@@ -48,11 +48,11 @@ export default function EventViewer() {
   const [searched, setSearched] = useState(false);
 
   // Preset
-  const [activePreset, setActivePreset] = useState<DatePreset | null>(null);
+  const [activePreset, setActivePreset] = useState<DatePreset | null>("7days");
 
   // Filters
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
+  const [startDate, setStartDate] = useState(() => getPresetDates("7days").start);
+  const [endDate, setEndDate] = useState(() => getPresetDates("7days").end);
   const [sourceFilter, setSourceFilter] = useState("");
   const [level, setLevel] = useState<LevelFilter>("All");
 
@@ -69,29 +69,41 @@ export default function EventViewer() {
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
 
   const fetchLogs = useCallback(
-    async (targetPage = 0, overrideStart?: string, overrideEnd?: string) => {
+    async (
+      targetPage = 0,
+      overrideStart?: string,
+      overrideEnd?: string,
+      overrideSources?: { system: boolean; application: boolean; security: boolean },
+      overrideLevel?: LevelFilter,
+      overrideSourceFilter?: string,
+      overridePageSize?: number,
+    ) => {
       setLoading(true);
       setSearched(true);
       setExpandedRow(null);
 
+      const sources = overrideSources ?? { system: showSystem, application: showApplication, security: showSecurity };
       const logSources: string[] = [];
-      if (showSystem) logSources.push("System");
-      if (showApplication) logSources.push("Application");
-      if (showSecurity) logSources.push("Security");
+      if (sources.system) logSources.push("System");
+      if (sources.application) logSources.push("Application");
+      if (sources.security) logSources.push("Security");
       if (logSources.length === 0) logSources.push("System", "Application");
 
       const finalStart = overrideStart ?? startDate;
       const finalEnd = overrideEnd ?? endDate;
+      const finalLevel = overrideLevel ?? level;
+      const finalSourceFilter = overrideSourceFilter ?? sourceFilter;
+      const finalPageSize = overridePageSize ?? pageSize;
 
       try {
         const data = await invoke<CrashLogResult>("get_crash_logs", {
           startDate: finalStart || null,
           endDate: finalEnd || null,
-          sourceFilter: sourceFilter || null,
-          level: level === "All" ? null : level,
+          sourceFilter: finalSourceFilter || null,
+          level: finalLevel === "All" ? null : finalLevel,
           logSources,
           page: targetPage,
-          pageSize,
+          pageSize: finalPageSize,
         });
         setResult(data);
         setPage(targetPage);
@@ -105,6 +117,13 @@ export default function EventViewer() {
     [startDate, endDate, sourceFilter, level, showSystem, showApplication, showSecurity, pageSize]
   );
 
+  // Auto-load on mount
+  useEffect(() => {
+    const { start, end } = getPresetDates("7days");
+    fetchLogs(0, start, end);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const handlePreset = (preset: DatePreset) => {
     setActivePreset(preset);
     if (preset === "custom") return;
@@ -112,7 +131,7 @@ export default function EventViewer() {
     const { start, end } = getPresetDates(preset);
     setStartDate(start);
     setEndDate(end);
-    // Immediately search
+    // Pass overrides since setState is async
     fetchLogs(0, start, end);
   };
 

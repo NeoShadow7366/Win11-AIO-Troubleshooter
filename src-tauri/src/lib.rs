@@ -42,6 +42,20 @@ pub fn run() {
             commands::admin::is_admin,
             commands::admin::relaunch_as_admin,
             commands::admin::open_path_in_explorer,
+            // ─── V2 Features ───
+            // Hardware Health
+            commands::hardware_health::get_hardware_health,
+            // Health Score
+            commands::health_score::get_health_score,
+            // Startup Manager
+            commands::startup_manager::get_startup_items,
+            commands::startup_manager::toggle_startup_item,
+            // Network Diagnostics
+            commands::network_diagnostics::get_active_connections,
+            commands::network_diagnostics::ping_host,
+            commands::network_diagnostics::traceroute_host,
+            commands::network_diagnostics::dns_lookup,
+            commands::network_diagnostics::get_wifi_info,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

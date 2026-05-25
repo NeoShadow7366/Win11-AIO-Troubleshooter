@@ -15,18 +15,23 @@ import {
   Clock,
   Cpu,
   Info,
+  X,
+  Shield,
 } from "lucide-react";
 import type { MinidumpInfo, BsodRecord, DumpAnalysis } from "../types";
+import { useAdmin } from "./Layout";
 
 export default function BsodAnalyzer() {
   const [dumps, setDumps] = useState<MinidumpInfo[]>([]);
   const [bsods, setBsods] = useState<BsodRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const { isAdmin, promptAdmin } = useAdmin();
 
   // Selected dump analysis
   const [selectedDump, setSelectedDump] = useState<MinidumpInfo | null>(null);
   const [analysis, setAnalysis] = useState<DumpAnalysis | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
+  const [selectedBsod, setSelectedBsod] = useState<number | null>(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -55,6 +60,7 @@ export default function BsodAnalyzer() {
       return;
     }
     setSelectedDump(dump);
+    setSelectedBsod(null);
     setAnalyzing(true);
     setAnalysis(null);
     try {
@@ -72,6 +78,24 @@ export default function BsodAnalyzer() {
     const parts = [analysis.bug_check_code];
     if (analysis.faulting_module) parts.push(analysis.faulting_module);
     parts.push("BSOD Windows");
+    const query = encodeURIComponent(parts.join(" "));
+    open(`https://www.google.com/search?q=${query}`);
+  };
+
+  const handleSelectBsod = (idx: number) => {
+    if (selectedBsod === idx && !selectedDump) {
+      setSelectedBsod(null);
+      return;
+    }
+    setSelectedBsod(idx);
+    setSelectedDump(null);
+    setAnalysis(null);
+  };
+
+  const handleSearchBsodWeb = (bsod: BsodRecord) => {
+    const parts = [bsod.bugcheck_code];
+    if (bsod.description) parts.push(bsod.description.substring(0, 60));
+    parts.push("BSOD Windows fix");
     const query = encodeURIComponent(parts.join(" "));
     open(`https://www.google.com/search?q=${query}`);
   };
@@ -122,24 +146,53 @@ export default function BsodAnalyzer() {
         </div>
       ) : !hasData ? (
         <div className="flex-1 flex flex-col items-center justify-center gap-4 text-center">
-          <div className="flex items-center justify-center w-16 h-16 rounded-2xl bg-success/10">
-            <CheckCircle2 className="w-8 h-8 text-success" />
-          </div>
-          <div>
-            <h3 className="text-[15px] font-semibold text-white/80 mb-1">
-              No BSOD Records Found
-            </h3>
-            <p className="text-[13px] text-white/35 max-w-md leading-relaxed">
-              Your system appears stable! No blue screen crash dumps or
-              BSOD history entries were detected. Keep up the good work! 🎉
-            </p>
-          </div>
+          {!isAdmin ? (
+            /* Non-admin: show admin required message */
+            <>
+              <div className="flex items-center justify-center w-16 h-16 rounded-2xl bg-warning/10">
+                <Shield className="w-8 h-8 text-warning" />
+              </div>
+              <div>
+                <h3 className="text-[15px] font-semibold text-white/80 mb-1">
+                  Administrator Required
+                </h3>
+                <p className="text-[13px] text-white/35 max-w-md leading-relaxed">
+                  BSOD crash dumps and event logs require administrator privileges
+                  to access. Relaunch the app as admin to view crash history.
+                </p>
+                <button
+                  onClick={promptAdmin}
+                  className="mt-3 inline-flex items-center gap-2 h-9 px-4 rounded-lg text-[12.5px] font-medium
+                             bg-accent/90 text-black hover:bg-accent transition-all duration-200"
+                >
+                  <Shield className="w-3.5 h-3.5" />
+                  Relaunch as Admin
+                </button>
+              </div>
+            </>
+          ) : (
+            /* Admin but no data: system is stable */
+            <>
+              <div className="flex items-center justify-center w-16 h-16 rounded-2xl bg-success/10">
+                <CheckCircle2 className="w-8 h-8 text-success" />
+              </div>
+              <div>
+                <h3 className="text-[15px] font-semibold text-white/80 mb-1">
+                  No BSOD Records Found
+                </h3>
+                <p className="text-[13px] text-white/35 max-w-md leading-relaxed">
+                  Your system appears stable! No blue screen crash dumps or
+                  BSOD history entries were detected. Keep up the good work! 🎉
+                </p>
+              </div>
+            </>
+          )}
         </div>
       ) : (
         <div className="flex flex-1 gap-4 min-h-0">
           {/* Left: Dump List + BSOD History */}
           <div className={`flex flex-col gap-4 overflow-y-auto transition-all duration-300 ${
-            selectedDump ? "w-[350px] min-w-[350px]" : "w-full"
+            selectedDump || selectedBsod !== null ? "w-[350px] min-w-[350px]" : "w-full"
           }`}>
             {/* Minidump Files */}
             {dumps.length > 0 && (
@@ -187,43 +240,52 @@ export default function BsodAnalyzer() {
                   BSOD History
                 </h2>
                 <div className="flex flex-col gap-3">
-                  {bsods.map((bsod, idx) => (
-                    <div
-                      key={idx}
-                      className="glass-panel p-4 hover:bg-white/[0.05] transition-all duration-300
-                                 border-l-2 border-l-danger/40"
-                    >
-                      <div className="flex items-start justify-between mb-3">
-                        <div className="flex items-center gap-3">
-                          <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-danger/15">
-                            <AlertOctagon className="w-4 h-4 text-danger" />
+                  {bsods.map((bsod, idx) => {
+                    const isSelected = !selectedDump && selectedBsod === idx;
+                    return (
+                      <div
+                        key={idx}
+                        onClick={() => handleSelectBsod(idx)}
+                        className={`glass-panel p-4 cursor-pointer transition-all duration-300
+                                   border-l-2 ${isSelected
+                                     ? "border-l-accent bg-accent/[0.04]"
+                                     : "border-l-danger/40 hover:bg-white/[0.05]"}`}
+                      >
+                        <div className="flex items-start justify-between mb-3">
+                          <div className="flex items-center gap-3">
+                            <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-danger/15">
+                              <AlertOctagon className="w-4 h-4 text-danger" />
+                            </div>
+                            <div>
+                              <span className="text-[14px] font-bold font-mono text-danger/90 tracking-wider">
+                                {bsod.bugcheck_code}
+                              </span>
+                              <p className="text-[12px] text-white/50 mt-0.5 line-clamp-2">
+                                {bsod.description}
+                              </p>
+                            </div>
                           </div>
-                          <div>
-                            <span className="text-[14px] font-bold font-mono text-danger/90 tracking-wider">
-                              {bsod.bugcheck_code}
+                          <div className="flex items-center gap-2 shrink-0 ml-4">
+                            <span className="text-[11px] text-white/30 font-mono tabular-nums">
+                              {bsod.date}
                             </span>
-                            <p className="text-[12px] text-white/50 mt-0.5 line-clamp-2">
-                              {bsod.description}
+                            <ChevronRight className="w-3.5 h-3.5 text-white/20" />
+                          </div>
+                        </div>
+
+                        {bsod.parameters && (
+                          <div className="bg-white/[0.03] rounded-md px-2.5 py-1.5 mt-1">
+                            <span className="text-[9px] text-white/25 uppercase tracking-wider font-semibold">
+                              Parameters
+                            </span>
+                            <p className="text-[11px] text-white/50 font-mono truncate mt-0.5">
+                              {bsod.parameters}
                             </p>
                           </div>
-                        </div>
-                        <span className="text-[11px] text-white/30 font-mono tabular-nums shrink-0 ml-4">
-                          {bsod.date}
-                        </span>
+                        )}
                       </div>
-
-                      {bsod.parameters && (
-                        <div className="bg-white/[0.03] rounded-md px-2.5 py-1.5 mt-1">
-                          <span className="text-[9px] text-white/25 uppercase tracking-wider font-semibold">
-                            Parameters
-                          </span>
-                          <p className="text-[11px] text-white/50 font-mono truncate mt-0.5">
-                            {bsod.parameters}
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </section>
             )}
@@ -396,6 +458,107 @@ export default function BsodAnalyzer() {
                     Analysis unavailable
                   </div>
                 )}
+              </div>
+            </div>
+          )}
+
+          {/* Right: BSOD History Detail Panel */}
+          {selectedBsod !== null && !selectedDump && bsods[selectedBsod] && (
+            <div className="flex-1 glass-panel-strong flex flex-col overflow-hidden animate-slide-in min-w-0">
+              {/* Panel Header */}
+              <div className="flex items-center justify-between px-4 h-11 border-b border-white/[0.06] shrink-0">
+                <div className="flex items-center gap-2">
+                  <AlertOctagon className="w-4 h-4 text-danger" />
+                  <span className="text-[13px] font-semibold text-white/90">BSOD Details</span>
+                </div>
+                <button
+                  onClick={() => setSelectedBsod(null)}
+                  className="flex items-center justify-center w-7 h-7 rounded-md
+                             text-white/30 hover:text-white/70 hover:bg-white/[0.06]
+                             transition-all duration-200"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center gap-2 px-4 py-3 border-b border-white/[0.04] shrink-0">
+                <button
+                  onClick={() => handleSearchBsodWeb(bsods[selectedBsod!])}
+                  className="flex items-center gap-1.5 h-8 px-3.5 rounded-lg text-[12px] font-medium
+                             bg-accent/10 text-accent/80 hover:bg-accent/20 hover:text-accent
+                             transition-all duration-200 border border-accent/20"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  Search Web for Fix
+                </button>
+              </div>
+
+              {/* BSOD Content */}
+              <div className="flex-1 overflow-y-auto p-4">
+                <div className="flex flex-col gap-5">
+                  {/* Bug Check Code */}
+                  <div className="glass-panel p-5 border-l-2 border-l-danger/50">
+                    <div className="flex items-center gap-3 mb-3">
+                      <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-danger/15">
+                        <AlertOctagon className="w-5 h-5 text-danger" />
+                      </div>
+                      <span className="text-[18px] font-bold font-mono text-danger/90 tracking-wider">
+                        {bsods[selectedBsod!].bugcheck_code}
+                      </span>
+                    </div>
+                    {bsods[selectedBsod!].description && (
+                      <p className="text-[12.5px] text-white/60 leading-relaxed">
+                        {bsods[selectedBsod!].description}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Details Grid */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <AnalysisField
+                      icon={<Clock className="w-3.5 h-3.5" />}
+                      label="Date"
+                      value={bsods[selectedBsod!].date}
+                    />
+                    <AnalysisField
+                      icon={<Hash className="w-3.5 h-3.5" />}
+                      label="Bug Check Code"
+                      value={bsods[selectedBsod!].bugcheck_code}
+                      highlight
+                    />
+                  </div>
+
+                  {/* Parameters */}
+                  {bsods[selectedBsod!].parameters && (
+                    <div>
+                      <h4 className="text-[11px] font-semibold text-white/30 uppercase tracking-wider mb-2 flex items-center gap-2">
+                        <Hash className="w-3.5 h-3.5" />
+                        Parameters
+                      </h4>
+                      <div className="bg-white/[0.03] rounded-lg px-3 py-2.5 border border-white/[0.05]">
+                        <p className="text-[12px] text-accent/70 font-mono break-all">
+                          {bsods[selectedBsod!].parameters}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Troubleshooting Tips */}
+                  <div>
+                    <h4 className="text-[11px] font-semibold text-white/30 uppercase tracking-wider mb-2">
+                      Troubleshooting
+                    </h4>
+                    <div className="glass-panel p-3.5 flex flex-col gap-2">
+                      <p className="text-[12px] text-white/55 leading-relaxed">
+                        Click <strong className="text-accent/80">"Search Web for Fix"</strong> above to find community solutions and Microsoft documentation for this specific error.
+                      </p>
+                      <p className="text-[12px] text-white/40 leading-relaxed">
+                        Common causes include driver issues, hardware failures, overheating, or corrupted system files. Running SFC and DISM from Quick Tools can help resolve system file corruption.
+                      </p>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           )}

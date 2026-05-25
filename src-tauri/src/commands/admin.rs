@@ -17,6 +17,8 @@ pub async fn is_admin() -> Result<bool, String> {
 }
 
 /// Relaunch the application as administrator using runas verb.
+/// Returns Ok if the elevated process was launched successfully.
+/// The frontend is responsible for closing this window afterwards.
 #[tauri::command]
 pub async fn relaunch_as_admin() -> Result<(), String> {
     tokio::task::spawn_blocking(|| {
@@ -24,8 +26,18 @@ pub async fn relaunch_as_admin() -> Result<(), String> {
             .map_err(|e| format!("Failed to get exe path: {}", e))?;
         let exe_str = exe_path.to_string_lossy().replace('\'', "''");
 
+        // Use Start-Process with -Verb RunAs to elevate.
+        // Wrap in cmd /c start to fully detach the child process from this process tree,
+        // so closing this window won't kill the elevated instance.
         let script = format!(
-            r#"Start-Process '{}' -Verb RunAs"#,
+            r#"
+            $p = Start-Process -FilePath '{}' -Verb RunAs -PassThru -ErrorAction Stop
+            if ($p) {{
+                Write-Host "Launched PID: $($p.Id)"
+            }} else {{
+                throw 'Failed to launch elevated process'
+            }}
+            "#,
             exe_str
         );
         run_powershell(&script)?;

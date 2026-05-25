@@ -28,6 +28,7 @@ import {
   SkipForward,
   CheckCircle2,
   Circle,
+  Recycle,
 } from "lucide-react";
 import type { CliOutput } from "../types";
 
@@ -146,6 +147,12 @@ const TOOLS: ToolDef[] = [
     icon: <Trash2 className="w-5 h-5" />,
   },
   {
+    id: "empty_recycle", label: "Empty Recycle Bin", category: "performance", needsAdmin: false, order: 2.5,
+    description: "Permanently delete all items in the Recycle Bin",
+    detailedInfo: "Empties the Recycle Bin for all drives. Shows how much space was freed. This cannot be undone — make sure you don't need anything in the bin before running.",
+    icon: <Recycle className="w-5 h-5" />,
+  },
+  {
     id: "clear_wucache", label: "Clear Update Cache", category: "performance", needsAdmin: true, order: 3,
     description: "Clear Windows Update download cache",
     detailedInfo: "Stops Windows Update services, deletes downloaded update files, and restarts services. Fixes stuck updates and frees space. Updates re-download as needed.",
@@ -228,6 +235,7 @@ const HEALTHCARE_ROUTINE: HealthcareStep[] = [
   { toolId: "defender_scan", reason: "Scan for malware that could be causing issues" },
   { toolId: "clear_temp", reason: "Free up disk space by removing temporary files" },
   { toolId: "disk_cleanup", reason: "Deep clean system caches and unnecessary files" },
+  { toolId: "empty_recycle", reason: "Free up space by emptying the Recycle Bin" },
   { toolId: "dism", reason: "Repair the Windows component store (source for system files)" },
   { toolId: "sfc", reason: "Scan and repair protected system files using repaired store" },
   { toolId: "flush_dns", reason: "Clear stale DNS entries for better connectivity" },
@@ -582,49 +590,111 @@ export default function QuickTools() {
         </div>
       )}
 
-      {/* Terminal Output */}
-      <div className="flex flex-col flex-1 glass-panel overflow-hidden min-h-[180px]">
-        <div className="flex items-center justify-between px-4 h-9 border-b border-white/[0.06]
-                        bg-white/[0.02] shrink-0">
-          <div className="flex items-center gap-2">
-            <div className="flex gap-1.5">
-              <div className="w-2.5 h-2.5 rounded-full bg-danger/60" />
-              <div className="w-2.5 h-2.5 rounded-full bg-warning/60" />
-              <div className="w-2.5 h-2.5 rounded-full bg-success/60" />
-            </div>
-            <span className="text-[11px] text-white/30 font-mono ml-2">Terminal Output</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <button onClick={copyOutput}
-              className="flex items-center gap-1 h-6 px-2 rounded text-[10px] font-medium
-                         text-white/30 hover:text-white/60 hover:bg-white/[0.05] transition-all duration-200">
-              {copied ? <><Check className="w-3 h-3 text-success" /><span className="text-success">Copied</span></> : <><Copy className="w-3 h-3" />Copy</>}
-            </button>
-            <button onClick={clearTerminal}
-              className="flex items-center gap-1 h-6 px-2 rounded text-[10px] font-medium
-                         text-white/30 hover:text-white/60 hover:bg-white/[0.05] transition-all duration-200">
-              <X className="w-3 h-3" />Clear
-            </button>
-          </div>
-        </div>
+      {/* Terminal Output — Resizable */}
+      <TerminalPanel
+        output={output}
+        terminalRef={terminalRef}
+        copied={copied}
+        runningTool={runningTool}
+        onCopy={copyOutput}
+        onClear={clearTerminal}
+      />
+    </div>
+  );
+}
 
-        <div ref={terminalRef} className="flex-1 overflow-y-auto p-4 bg-[#07070f]">
-          {output.length === 0 ? (
-            <div className="flex items-center justify-center h-full">
-              <span className="text-[12px] text-white/15 font-mono">
-                Select a tool and click Run to begin...
-              </span>
-            </div>
-          ) : (
-            <pre className="terminal-output whitespace-pre-wrap break-words">
-              {output.map((line, i) => (
-                <div key={i} className={line.type === "stderr" ? "stderr" : line.type === "info" ? "info" : "stdout"}>
-                  {line.text}
-                </div>
-              ))}
-            </pre>
+/* ─── Resizable Terminal Panel ─── */
+function TerminalPanel({
+  output,
+  terminalRef,
+  copied,
+  runningTool,
+  onCopy,
+  onClear,
+}: {
+  output: OutputLine[];
+  terminalRef: React.RefObject<HTMLDivElement | null>;
+  copied: boolean;
+  runningTool: string | null;
+  onCopy: () => void;
+  onClear: () => void;
+}) {
+  const [height, setHeight] = useState(220);
+  const dragRef = useRef<{ startY: number; startHeight: number } | null>(null);
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    dragRef.current = { startY: e.clientY, startHeight: height };
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!dragRef.current) return;
+      const delta = dragRef.current.startY - e.clientY;
+      const newHeight = Math.max(120, Math.min(window.innerHeight * 0.75, dragRef.current.startHeight + delta));
+      setHeight(newHeight);
+    };
+
+    const handleMouseUp = () => {
+      dragRef.current = null;
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+    };
+
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", handleMouseUp);
+  }, [height]);
+
+  return (
+    <div className="flex flex-col glass-panel overflow-hidden shrink-0" style={{ height }}>
+      {/* Resize handle (top edge) */}
+      <div className="terminal-resize-handle" onMouseDown={handleMouseDown} />
+
+      {/* Terminal header */}
+      <div className="flex items-center justify-between px-4 h-9 border-b border-white/[0.06]
+                       bg-white/[0.02] shrink-0">
+        <div className="flex items-center gap-2">
+          <div className="flex gap-1.5">
+            <div className="w-2.5 h-2.5 rounded-full bg-danger/60" />
+            <div className="w-2.5 h-2.5 rounded-full bg-warning/60" />
+            <div className="w-2.5 h-2.5 rounded-full bg-success/60" />
+          </div>
+          <span className="text-[11px] text-white/30 font-mono ml-2">Terminal Output</span>
+          {runningTool && (
+            <span className="text-[10px] text-accent/60 font-medium ml-2 flex items-center gap-1">
+              <Loader2 className="w-3 h-3 animate-spin" />
+              Running...
+            </span>
           )}
         </div>
+        <div className="flex items-center gap-1">
+          <button onClick={onCopy}
+            className="flex items-center gap-1 h-6 px-2 rounded text-[10px] font-medium
+                       text-white/30 hover:text-white/60 hover:bg-white/[0.05] transition-all duration-200">
+            {copied ? <><Check className="w-3 h-3 text-success" /><span className="text-success">Copied</span></> : <><Copy className="w-3 h-3" />Copy</>}
+          </button>
+          <button onClick={onClear}
+            className="flex items-center gap-1 h-6 px-2 rounded text-[10px] font-medium
+                       text-white/30 hover:text-white/60 hover:bg-white/[0.05] transition-all duration-200">
+            <X className="w-3 h-3" />Clear
+          </button>
+        </div>
+      </div>
+
+      <div ref={terminalRef as React.RefObject<HTMLDivElement>} className="flex-1 overflow-y-auto p-4 bg-[#07070f]">
+        {output.length === 0 ? (
+          <div className="flex items-center justify-center h-full">
+            <span className="text-[12px] text-white/15 font-mono">
+              Select a tool and click Run to begin...
+            </span>
+          </div>
+        ) : (
+          <pre className="terminal-output whitespace-pre-wrap break-words">
+            {output.map((line, i) => (
+              <div key={i} className={line.type === "stderr" ? "stderr" : line.type === "info" ? "info" : "stdout"}>
+                {line.text}
+              </div>
+            ))}
+          </pre>
+        )}
       </div>
     </div>
   );
