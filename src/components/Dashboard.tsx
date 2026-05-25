@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Monitor, Cpu, HardDrive, Server, Clock, Globe } from "lucide-react";
-import type { SystemStats, SystemSpecs } from "../types";
+import { Monitor, Cpu, HardDrive, Server, Clock, Globe, Wifi, Copy, Check } from "lucide-react";
+import type { SystemStats, SystemSpecs, DiskInfo } from "../types";
 
 /* ─── Circular Gauge ─── */
 interface GaugeProps {
@@ -115,6 +115,118 @@ function SpecCard({ icon, title, value, sub }: SpecCardProps) {
   );
 }
 
+/* ─── Disk Card ─── */
+function DiskCard({ disk }: { disk: DiskInfo }) {
+  const total = disk.total;
+  const used = disk.used;
+  const free = total - used;
+  const pct = total > 0 ? (used / total) * 100 : 0;
+  const color = pct > 90 ? "#ff4757" : pct > 70 ? "#ffa502" : "#2ed573";
+
+  return (
+    <div className="glass-panel p-4 hover:bg-white/[0.05] transition-all duration-300 group">
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2.5">
+          <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-accent/10">
+            <HardDrive className="w-4 h-4 text-accent" />
+          </div>
+          <div className="flex flex-col">
+            <span className="text-[13px] font-semibold text-white/85 leading-tight">{disk.name}</span>
+            <div className="flex items-center gap-2 mt-0.5">
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/[0.06] text-white/40 font-medium">
+                {disk.disk_type}
+              </span>
+              <span className="text-[10px] text-white/25 font-mono">{disk.file_system}</span>
+            </div>
+          </div>
+        </div>
+        <span className="text-[12px] font-mono tabular-nums text-white/40">
+          {pct.toFixed(0)}%
+        </span>
+      </div>
+
+      {/* Usage bar */}
+      <div className="w-full h-2 rounded-full bg-white/[0.06] overflow-hidden mb-2">
+        <div
+          className="h-full rounded-full transition-all duration-700 ease-out"
+          style={{
+            width: `${pct}%`,
+            background: color,
+            boxShadow: `0 0 8px ${color}40`,
+          }}
+        />
+      </div>
+
+      {/* Stats */}
+      <div className="flex justify-between text-[11px] text-white/35 font-mono tabular-nums">
+        <span>Used: {bytesToGB(used).toFixed(1)} GB</span>
+        <span>Free: {bytesToGB(free).toFixed(1)} GB</span>
+        <span>Total: {bytesToGB(total).toFixed(1)} GB</span>
+      </div>
+    </div>
+  );
+}
+
+/* ─── IP Card ─── */
+function IPCard({ internalIp, externalIp }: { internalIp: string; externalIp: string }) {
+  const [copied, setCopied] = useState<string | null>(null);
+
+  const copyToClipboard = async (text: string, label: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(label);
+      setTimeout(() => setCopied(null), 2000);
+    } catch { /* clipboard may fail */ }
+  };
+
+  return (
+    <div className="glass-panel p-4 hover:bg-white/[0.05] transition-all duration-300 col-span-full">
+      <div className="flex items-center gap-2.5 mb-3">
+        <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-accent/10">
+          <Globe className="w-4 h-4 text-accent" />
+        </div>
+        <span className="text-[13px] font-semibold text-white/85">Network</span>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="flex items-center justify-between gap-2 bg-white/[0.03] rounded-lg px-3 py-2.5 border border-white/[0.05]">
+          <div className="flex items-center gap-2 min-w-0">
+            <Wifi className="w-3.5 h-3.5 text-success/60 shrink-0" />
+            <div className="flex flex-col min-w-0">
+              <span className="text-[10px] text-white/30 uppercase font-semibold">Internal IP</span>
+              <span className="text-[12.5px] text-white/70 font-mono truncate">{internalIp}</span>
+            </div>
+          </div>
+          <button
+            onClick={() => copyToClipboard(internalIp, "internal")}
+            className="flex items-center justify-center w-6 h-6 rounded text-white/25 hover:text-white/60
+                       hover:bg-white/[0.05] transition-all duration-200 shrink-0"
+            title="Copy to clipboard"
+          >
+            {copied === "internal" ? <Check className="w-3 h-3 text-success" /> : <Copy className="w-3 h-3" />}
+          </button>
+        </div>
+        <div className="flex items-center justify-between gap-2 bg-white/[0.03] rounded-lg px-3 py-2.5 border border-white/[0.05]">
+          <div className="flex items-center gap-2 min-w-0">
+            <Globe className="w-3.5 h-3.5 text-accent/60 shrink-0" />
+            <div className="flex flex-col min-w-0">
+              <span className="text-[10px] text-white/30 uppercase font-semibold">External IP</span>
+              <span className="text-[12.5px] text-white/70 font-mono truncate">{externalIp}</span>
+            </div>
+          </div>
+          <button
+            onClick={() => copyToClipboard(externalIp, "external")}
+            className="flex items-center justify-center w-6 h-6 rounded text-white/25 hover:text-white/60
+                       hover:bg-white/[0.05] transition-all duration-200 shrink-0"
+            title="Copy to clipboard"
+          >
+            {copied === "external" ? <Check className="w-3 h-3 text-success" /> : <Copy className="w-3 h-3" />}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ─── Skeleton ─── */
 function SkeletonGauge() {
   return (
@@ -203,13 +315,37 @@ export default function Dashboard() {
               <CircularGauge
                 value={bytesToGB(stats.disk_used)}
                 max={bytesToGB(stats.disk_total)}
-                label="Disk"
+                label="Total Disk"
                 icon={<HardDrive className="w-4 h-4" />}
               />
             </>
           )}
-        </div>
+      </div>
       </section>
+
+      {/* Network IPs */}
+      {stats && (
+        <section>
+          <h2 className="text-[11px] font-semibold text-white/30 uppercase tracking-[0.12em] mb-3 px-1">
+            Network
+          </h2>
+          <IPCard internalIp={stats.internal_ip} externalIp={stats.external_ip} />
+        </section>
+      )}
+
+      {/* Per-Disk Storage */}
+      {stats && stats.disks && stats.disks.length > 0 && (
+        <section>
+          <h2 className="text-[11px] font-semibold text-white/30 uppercase tracking-[0.12em] mb-3 px-1">
+            Disk Drives
+          </h2>
+          <div className="grid grid-cols-2 gap-3">
+            {stats.disks.map((disk, i) => (
+              <DiskCard key={`${disk.mount_point}-${i}`} disk={disk} />
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* System Specs */}
       <section>

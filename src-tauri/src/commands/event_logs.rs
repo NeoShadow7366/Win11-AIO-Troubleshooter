@@ -40,7 +40,8 @@ pub async fn get_event_logs(
         let valid_log = match log_name.as_str() {
             "System" => "System",
             "Application" => "Application",
-            _ => return Err(format!("Invalid log name '{}'. Use 'System' or 'Application'.", log_name)),
+            "Security" => "Security",
+            _ => return Err(format!("Invalid log name '{}'. Use 'System', 'Application', or 'Security'.", log_name)),
         };
 
         // Build the Level filter based on the requested severity

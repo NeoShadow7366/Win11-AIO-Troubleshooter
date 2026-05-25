@@ -6,12 +6,25 @@ use sysinfo::{Disks, System};
 use crate::utils::powershell::run_powershell;
 
 #[derive(Debug, Serialize, Clone)]
+pub struct DiskInfo {
+    pub name: String,
+    pub mount_point: String,
+    pub disk_type: String,
+    pub file_system: String,
+    pub total: u64,
+    pub used: u64,
+}
+
+#[derive(Debug, Serialize, Clone)]
 pub struct SystemStats {
     pub cpu_usage: f32,
     pub ram_used: u64,
     pub ram_total: u64,
     pub disk_used: u64,
     pub disk_total: u64,
+    pub disks: Vec<DiskInfo>,
+    pub internal_ip: String,
+    pub external_ip: String,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -23,7 +36,7 @@ pub struct SystemSpecs {
     pub hostname: String,
 }
 
-/// Returns live system statistics: CPU usage, RAM, and disk usage.
+/// Returns live system statistics: CPU usage, RAM, per-disk info, and IP addresses.
 /// CPU measurement requires two refreshes with a short delay for accuracy.
 #[tauri::command]
 pub async fn get_system_stats() -> Result<SystemStats, String> {
@@ -42,15 +55,63 @@ pub async fn get_system_stats() -> Result<SystemStats, String> {
         let ram_used = sys.used_memory();
         let ram_total = sys.total_memory();
 
-        // Aggregate disk usage across all mounted disks
-        let disks = Disks::new_with_refreshed_list();
+        // Enumerate each disk individually
+        let sysinfo_disks = Disks::new_with_refreshed_list();
         let mut disk_total: u64 = 0;
         let mut disk_available: u64 = 0;
-        for disk in disks.list() {
-            disk_total += disk.total_space();
-            disk_available += disk.available_space();
+        let mut disks: Vec<DiskInfo> = Vec::new();
+
+        for disk in sysinfo_disks.list() {
+            let total = disk.total_space();
+            let available = disk.available_space();
+            let used = total.saturating_sub(available);
+
+            disk_total += total;
+            disk_available += available;
+
+            let disk_type = match disk.kind() {
+                sysinfo::DiskKind::SSD => "SSD",
+                sysinfo::DiskKind::HDD => "HDD",
+                _ => "Unknown",
+            };
+
+            let file_system = disk
+                .file_system()
+                .to_string_lossy()
+                .to_string();
+
+            let mount_point = disk.mount_point().to_string_lossy().to_string();
+
+            let name = disk.name().to_string_lossy().to_string();
+            let display_name = if name.is_empty() {
+                format!("Local Disk ({})", mount_point.trim_end_matches('\\'))
+            } else {
+                format!("{} ({})", name, mount_point.trim_end_matches('\\'))
+            };
+
+            disks.push(DiskInfo {
+                name: display_name,
+                mount_point,
+                disk_type: disk_type.to_string(),
+                file_system,
+                total,
+                used,
+            });
         }
+
         let disk_used = disk_total.saturating_sub(disk_available);
+
+        // Get internal IP
+        let internal_ip = run_powershell(
+            r#"(Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.InterfaceAlias -notlike '*Loopback*' -and $_.PrefixOrigin -ne 'WellKnown' } | Select-Object -First 1 -ExpandProperty IPAddress) 2>$null"#,
+        )
+        .unwrap_or_else(|_| "Unavailable".to_string());
+
+        // Get external IP (with timeout)
+        let external_ip = run_powershell(
+            r#"try { (Invoke-WebRequest -Uri 'https://api.ipify.org' -UseBasicParsing -TimeoutSec 3).Content } catch { 'Unavailable' }"#,
+        )
+        .unwrap_or_else(|_| "Unavailable".to_string());
 
         Ok(SystemStats {
             cpu_usage,
@@ -58,6 +119,9 @@ pub async fn get_system_stats() -> Result<SystemStats, String> {
             ram_total,
             disk_used,
             disk_total,
+            disks,
+            internal_ip,
+            external_ip,
         })
     })
     .await

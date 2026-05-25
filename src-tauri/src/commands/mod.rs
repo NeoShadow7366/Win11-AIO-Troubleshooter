@@ -1,7 +1,10 @@
+pub mod admin;
 pub mod app_insights;
 pub mod bsod_analyzer;
 pub mod cli_tools;
+pub mod crash_logs;
 pub mod event_logs;
+pub mod favorites;
 pub mod processes;
 pub mod services;
 pub mod system_info;

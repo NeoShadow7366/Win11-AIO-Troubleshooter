@@ -16,17 +16,90 @@ pub enum CliOutput {
 /// Maps a tool_id to the actual system command to execute.
 fn get_tool_command(tool_id: &str) -> Option<(&str, Vec<&str>)> {
     match tool_id {
+        // ─── System Repair ───
         "sfc" => Some(("cmd", vec!["/C", "sfc", "/scannow"])),
         "dism" => Some((
             "cmd",
             vec!["/C", "DISM", "/Online", "/Cleanup-Image", "/RestoreHealth"],
         )),
+        "chkdsk" => Some(("cmd", vec!["/C", "chkdsk", "C:", "/f"])),
+        "component_cleanup" => Some((
+            "cmd",
+            vec!["/C", "DISM", "/Online", "/Cleanup-Image", "/StartComponentCleanup"],
+        )),
+        "restore_point" => Some((
+            "powershell",
+            vec!["-NoProfile", "-Command", "Checkpoint-Computer -Description 'AIO-Troubleshooter' -RestorePointType MODIFY_SETTINGS"],
+        )),
+
+        // ─── Network ───
         "flush_dns" => Some(("cmd", vec!["/C", "ipconfig", "/flushdns"])),
         "reset_network" => Some(("cmd", vec!["/C", "netsh", "winsock", "reset"])),
-        "chkdsk" => Some(("cmd", vec!["/C", "chkdsk", "C:", "/f"])),
-        "gpupdate" => Some(("cmd", vec!["/C", "gpupdate", "/force"])),
-        "disk_cleanup" => Some(("cmd", vec!["/C", "cleanmgr", "/sagerun:1"])),
         "reset_ip" => Some(("cmd", vec!["/C", "netsh", "int", "ip", "reset"])),
+        "release_renew" => Some((
+            "cmd",
+            vec!["/C", "ipconfig", "/release", "&", "ipconfig", "/renew"],
+        )),
+        "restart_adapters" => Some((
+            "powershell",
+            vec!["-NoProfile", "-Command", "Get-NetAdapter | Restart-NetAdapter -Confirm:$false"],
+        )),
+        "display_dns" => Some(("cmd", vec!["/C", "ipconfig", "/displaydns"])),
+
+        // ─── Performance ───
+        "disk_cleanup" => Some(("cmd", vec!["/C", "cleanmgr", "/sagerun:1"])),
+        "clear_temp" => Some((
+            "powershell",
+            vec!["-NoProfile", "-Command",
+                 "Write-Host 'Clearing temp files...'; $before = (Get-ChildItem $env:TEMP -Recurse -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum; Remove-Item \"$env:TEMP\\*\" -Recurse -Force -ErrorAction SilentlyContinue; $after = (Get-ChildItem $env:TEMP -Recurse -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum; $freed = [math]::Round(($before - $after) / 1MB, 2); Write-Host \"Freed $freed MB from temp folder.\""],
+        )),
+        "defrag" => Some(("cmd", vec!["/C", "defrag", "C:", "/U", "/V"])),
+        "power_report" => Some((
+            "powershell",
+            vec!["-NoProfile", "-Command",
+                 "$report = \"$env:USERPROFILE\\Desktop\\energy-report.html\"; powercfg /energy /output $report; Write-Host \"Energy report saved to: $report\"; Start-Process $report"],
+        )),
+        "clear_wucache" => Some((
+            "powershell",
+            vec!["-NoProfile", "-Command",
+                 "Stop-Service wuauserv -Force -ErrorAction SilentlyContinue; Stop-Service bits -Force -ErrorAction SilentlyContinue; Remove-Item 'C:\\Windows\\SoftwareDistribution\\Download\\*' -Recurse -Force -ErrorAction SilentlyContinue; Start-Service wuauserv; Start-Service bits; Write-Host 'Windows Update cache cleared and services restarted.'"],
+        )),
+
+        // ─── Security & Policy ───
+        "gpupdate" => Some(("cmd", vec!["/C", "gpupdate", "/force"])),
+        "defender_scan" => Some((
+            "powershell",
+            vec!["-NoProfile", "-Command",
+                 "Write-Host 'Starting Windows Defender Quick Scan...'; Start-MpScan -ScanType QuickScan; Write-Host 'Quick Scan initiated. Check Windows Security for results.'"],
+        )),
+        "clear_creds" => Some((
+            "powershell",
+            vec!["-NoProfile", "-Command",
+                 "Write-Host 'Listing cached credentials:'; cmdkey /list; Write-Host ''; Write-Host 'To remove a specific credential, use: cmdkey /delete:<target>'"],
+        )),
+
+        // ─── Diagnostics ───
+        "systeminfo" => Some(("cmd", vec!["/C", "systeminfo"])),
+        "battery_report" => Some((
+            "powershell",
+            vec!["-NoProfile", "-Command",
+                 "$report = \"$env:USERPROFILE\\Desktop\\battery-report.html\"; powercfg /batteryreport /output $report; Write-Host \"Battery report saved to: $report\"; Start-Process $report"],
+        )),
+        "wifi_report" => Some((
+            "powershell",
+            vec!["-NoProfile", "-Command",
+                 "netsh wlan show wlanreport; $report = 'C:\\ProgramData\\Microsoft\\Windows\\WlanReport\\wlan-report-latest.html'; if (Test-Path $report) { Write-Host \"WiFi report generated at: $report\"; Start-Process $report } else { Write-Host 'Report generation failed or WiFi not available.' }"],
+        )),
+        "dxdiag" => Some((
+            "powershell",
+            vec!["-NoProfile", "-Command",
+                 "$report = \"$env:USERPROFILE\\Desktop\\dxdiag-report.txt\"; Write-Host 'Running DirectX Diagnostics...'; dxdiag /t $report; Start-Sleep -Seconds 8; if (Test-Path $report) { Write-Host \"DxDiag report saved to: $report\"; Get-Content $report | Select-Object -First 30 } else { Write-Host 'Report not generated yet. Check Desktop in a few seconds.' }"],
+        )),
+        "mem_diag" => Some((
+            "powershell",
+            vec!["-NoProfile", "-Command",
+                 "Write-Host 'Scheduling Windows Memory Diagnostic...'; Write-Host 'Your computer will restart to run the memory test.'; Write-Host 'Save all work before proceeding.'; mdsched.exe"],
+        )),
         _ => None,
     }
 }

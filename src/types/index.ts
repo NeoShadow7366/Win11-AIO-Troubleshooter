@@ -1,11 +1,23 @@
 // ─── System ───
 
+export interface DiskInfo {
+  name: string;
+  mount_point: string;
+  disk_type: string;
+  file_system: string;
+  total: number;
+  used: number;
+}
+
 export interface SystemStats {
   cpu_usage: number;
   ram_used: number;
   ram_total: number;
   disk_used: number;
   disk_total: number;
+  disks: DiskInfo[];
+  internal_ip: string;
+  external_ip: string;
 }
 
 export interface SystemSpecs {
@@ -24,6 +36,23 @@ export interface ProcessInfo {
   cpu_usage: number;
   memory_mb: number;
   status: string;
+  path: string | null;
+}
+
+export interface ProcessDetails {
+  pid: number;
+  name: string;
+  cpu_usage: number;
+  memory_mb: number;
+  status: string;
+  path: string | null;
+  command_line: string | null;
+  user: string | null;
+  parent_pid: number | null;
+  thread_count: number | null;
+  start_time: string | null;
+  description: string | null;
+  company: string | null;
 }
 
 // ─── Services ───
@@ -67,6 +96,7 @@ export interface AppInsightResult {
 
 export interface MinidumpInfo {
   filename: string;
+  full_path: string;
   date_created: string;
   size_kb: number;
 }
@@ -76,6 +106,35 @@ export interface BsodRecord {
   bugcheck_code: string;
   description: string;
   parameters: string;
+}
+
+export interface DumpAnalysis {
+  bug_check_code: string;
+  bug_check_description: string;
+  timestamp: string;
+  parameters: string[];
+  faulting_module: string | null;
+  process_at_crash: string | null;
+  system_uptime: string | null;
+  dump_type: string | null;
+  os_version: string | null;
+  raw_output: string;
+}
+
+// ─── Favorites ───
+
+export interface FavoriteItem {
+  item_type: string;
+  name: string;
+  display_name: string | null;
+  path: string | null;
+}
+
+// ─── Crash Logs ───
+
+export interface CrashLogResult {
+  entries: EventLogEntry[];
+  total_count: number;
 }
 
 // ─── CLI Tool Output (Channel streaming) ───

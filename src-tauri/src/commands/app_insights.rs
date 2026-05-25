@@ -56,6 +56,7 @@ pub async fn get_app_insights(name: String) -> Result<AppInsightResult, String> 
                     cpu_usage: p.cpu_usage(),
                     memory_mb: p.memory() as f64 / (1024.0 * 1024.0),
                     status: status_str.to_string(),
+                    path: p.exe().map(|e| e.to_string_lossy().to_string()),
                 });
             }
         }

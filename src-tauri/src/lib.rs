@@ -11,6 +11,8 @@ pub fn run() {
             commands::system_info::get_system_specs,
             // Processes
             commands::processes::get_processes,
+            commands::processes::get_process_details,
+            commands::processes::get_process_icon,
             commands::processes::kill_process,
             // Services
             commands::services::get_services,
@@ -27,6 +29,19 @@ pub fn run() {
             // BSOD analyzer
             commands::bsod_analyzer::get_minidumps,
             commands::bsod_analyzer::get_bsod_history,
+            commands::bsod_analyzer::analyze_dump,
+            commands::bsod_analyzer::open_dump_file,
+            commands::bsod_analyzer::open_dump_folder,
+            // Favorites
+            commands::favorites::get_favorites,
+            commands::favorites::add_favorite,
+            commands::favorites::remove_favorite,
+            // Crash logs
+            commands::crash_logs::get_crash_logs,
+            // Admin / utilities
+            commands::admin::is_admin,
+            commands::admin::relaunch_as_admin,
+            commands::admin::open_path_in_explorer,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
