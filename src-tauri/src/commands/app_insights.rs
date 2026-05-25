@@ -50,6 +50,8 @@ pub async fn get_app_insights(name: String) -> Result<AppInsightResult, String> 
                     _ => "Unknown",
                 };
 
+                let disk = p.disk_usage();
+
                 processes.push(ProcessInfo {
                     pid: p.pid().as_u32(),
                     name: proc_name,
@@ -57,6 +59,8 @@ pub async fn get_app_insights(name: String) -> Result<AppInsightResult, String> 
                     memory_mb: p.memory() as f64 / (1024.0 * 1024.0),
                     status: status_str.to_string(),
                     path: p.exe().map(|e| e.to_string_lossy().to_string()),
+                    disk_read_bytes: disk.read_bytes,
+                    disk_write_bytes: disk.written_bytes,
                 });
             }
         }

@@ -22,7 +22,7 @@ A modern, beautiful desktop application for diagnosing, repairing, and maintaini
 | Feature | Description |
 |---------|-------------|
 | 📊 **Dashboard** | Real-time system gauges, per-disk storage, network IPs, hardware specs |
-| ⚙️ **Process Manager** | Inspect, kill, and favorite processes with icons and detailed info panels |
+| ⚙️ **Process Manager** | Inspect, kill, and favorite processes with icons, disk I/O, priority controls |
 | 🔧 **Services Manager** | Start/stop/restart services with WMI insights and Google search |
 | 📋 **Event Viewer** | Unified log browser with preset date ranges and advanced filtering |
 | 🔍 **App Insights** | Search apps, view related processes/events, open file paths in Explorer |
@@ -30,8 +30,14 @@ A modern, beautiful desktop application for diagnosing, repairing, and maintaini
 | 🛠️ **Quick Tools** | 24 system tools across 5 categories in best-practice order |
 | 💚 **PC Healthcare** | Guided 9-step system health routine with Run/Skip controls |
 | 💀 **BSOD Analyzer** | Minidump crash analysis with structured data and web search |
+| 🌡️ **Hardware Health** | CPU temps, GPU stats, memory modules, disk S.M.A.R.T. data |
+| 🚀 **Startup Manager** | Toggle startup items with color-coded impact ratings |
+| 🌐 **Network Diagnostics** | Active connections, ping, traceroute, DNS lookup, WiFi info |
 | 📖 **Feature Guide** | Interactive help panel with step-by-step instructions for every feature |
 | 🔐 **Admin Detection** | Auto-detects privileges, one-click UAC elevation when needed |
+| 🌓 **Theme Toggle** | Dark/light mode with smooth transitions |
+| 📄 **Export Reports** | Generate comprehensive HTML system reports |
+| ⌨️ **Keyboard Shortcuts** | Ctrl+1-9 navigation, quick access to all pages |
 
 ---
 
@@ -56,6 +62,8 @@ Full visibility into running processes:
 - **"What is this?"** — One-click Google search to learn about unknown processes
 - **Favorites** — Star processes to track them across App Insights
 - **Kill Process** — Terminate any process directly (requires admin for protected processes)
+- **Disk I/O** — Per-process disk read/write activity displayed inline
+- **Priority Controls** — Change process priority (Idle → Realtime) from the detail panel
 - **System Process Toggle** — Show/hide system-level processes for a cleaner view
 
 ---
@@ -168,10 +176,83 @@ Investigate blue screen crashes:
 
 Built-in interactive documentation:
 
-- **Access** — Click the `?` icon next to `v1.0.0` in the sidebar footer
+- **Access** — Click the `?` icon next to `v2.1.0` in the sidebar footer
 - **Categorized Features** — Monitoring, Analysis, and Tools categories
 - **Detail Cards** — Description, numbered how-to steps, and pro tips for every feature
 - **Searchable** — Filter by category to find what you need
+
+---
+
+## 🌡️ Hardware Health
+
+Monitor your system's hardware:
+
+- **CPU Temperatures** — Real-time temperature readings per core
+- **GPU Stats** — NVIDIA GPU monitoring (temperature, load, memory)
+- **Memory Modules** — Installed RAM module details (type, speed, capacity)
+- **Disk S.M.A.R.T.** — Health status, wear level, power-on hours, temperature
+- **Auto-Refresh** — Data updates every 5 seconds
+
+---
+
+## 🚀 Startup Manager
+
+Control what runs at boot:
+
+- **Registry Entries** — HKCU and HKLM Run/RunOnce keys
+- **Startup Folder** — User and common startup folder items
+- **Scheduled Tasks** — Logon-triggered scheduled tasks
+- **Toggle On/Off** — Enable or disable items with one click
+- **Impact Rating** — Color-coded startup impact (High, Medium, Low)
+- **"What is this?"** — Google lookup for unknown startup entries
+
+---
+
+## 🌐 Network Diagnostics
+
+Network troubleshooting tools:
+
+- **Active Connections** — TCP connections with process names and remote addresses
+- **Ping Test** — Latency testing to any host
+- **Traceroute** — Hop-by-hop route tracing
+- **DNS Lookup** — Resolve domain names to IP addresses
+- **WiFi Info** — Signal strength, SSID, authentication type
+
+---
+
+## 🌓 Theme Toggle
+
+- **Dark Mode** — Deep dark theme with glassmorphism (default)
+- **Light Mode** — Clean white/slate palette with subtle transparency
+- **Persistent** — Theme choice saved to localStorage
+- **Smooth Transitions** — Animated color transitions when switching
+
+---
+
+## 📄 Export Reports
+
+- **System Report** — Generates a comprehensive HTML report
+- **Includes** — System info, CPU/RAM usage, disk storage, BSOD history
+- **Styled** — Dark-themed HTML that matches the app's design
+- **One-Click** — Export button on the Dashboard header
+
+---
+
+## ⌨️ Keyboard Shortcuts
+
+| Shortcut | Action |
+|----------|--------|
+| `Ctrl+1` | Dashboard |
+| `Ctrl+2` | Processes |
+| `Ctrl+3` | Services |
+| `Ctrl+4` | Hardware Health |
+| `Ctrl+5` | Network Diagnostics |
+| `Ctrl+6` | Quick Tools |
+| `Ctrl+7` | Startup Manager |
+| `Ctrl+8` | Event Viewer |
+| `Ctrl+9` | App Insights |
+| `Ctrl+/` | Toggle page info |
+| `Escape` | Close modal/panel |
 
 ---
 
@@ -191,10 +272,10 @@ Smart privilege management:
 ## 🚀 Installation
 
 ### Option 1: MSI Installer (Recommended)
-Download `AIO Troubleshooter_1.0.0_x64_en-US.msi` from the [latest release](https://github.com/NeoShadow7366/Win11-AIO-Troubleshooter/releases/latest) and run the installer.
+Download `AIO Troubleshooter_2.1.0_x64_en-US.msi` from the [latest release](https://github.com/NeoShadow7366/Win11-AIO-Troubleshooter/releases/latest) and run the installer.
 
 ### Option 2: NSIS Setup
-Download `AIO Troubleshooter_1.0.0_x64-setup.exe` for a compact installer.
+Download `AIO Troubleshooter_2.1.0_x64-setup.exe` for a compact installer.
 
 ### Option 3: Portable
 Download `aio-troubleshooter.exe` and run it directly — no installation required.
@@ -243,16 +324,21 @@ Win11-AIO-Troubleshooter/
 ├── src/                          # React frontend (TypeScript)
 │   ├── components/
 │   │   ├── Dashboard.tsx         # System gauges, disks, IPs, specs
-│   │   ├── ProcessManager.tsx    # Process list, icons, info panel
+│   │   ├── ProcessManager.tsx    # Process list, icons, info panel, priority
 │   │   ├── ServicesManager.tsx   # Service control, insights
 │   │   ├── EventViewer.tsx       # Unified event log browser
 │   │   ├── AppInsights.tsx       # App search, processes, events
 │   │   ├── ServiceInsights.tsx   # Favorite services deep-dive
 │   │   ├── QuickTools.tsx        # 24 tools + PC Healthcare Routine
 │   │   ├── BsodAnalyzer.tsx      # Minidump crash analysis
+│   │   ├── HardwareHealth.tsx    # CPU/GPU temps, SMART data
+│   │   ├── StartupManager.tsx    # Boot item management
+│   │   ├── NetworkDiagnostics.tsx # Ping, traceroute, DNS, WiFi
 │   │   ├── FeatureGuide.tsx      # Interactive help panel
-│   │   ├── Layout.tsx            # Admin detection, routing
-│   │   ├── Sidebar.tsx           # Navigation + Feature Guide trigger
+│   │   ├── ExportButton.tsx      # System report export
+│   │   ├── ToastProvider.tsx     # Toast notification system
+│   │   ├── Layout.tsx            # Admin detection, routing, themes
+│   │   ├── Sidebar.tsx           # Navigation + theme toggle
 │   │   └── TitleBar.tsx          # Custom window controls
 │   ├── types/index.ts            # TypeScript type definitions
 │   └── main.tsx                  # App entry point
@@ -260,7 +346,7 @@ Win11-AIO-Troubleshooter/
 │   └── src/
 │       ├── commands/
 │       │   ├── system_info.rs    # CPU, RAM, disk, IP queries
-│       │   ├── processes.rs      # Process listing, details, icons
+│       │   ├── processes.rs      # Process listing, details, icons, priority
 │       │   ├── services.rs       # Service control, WMI queries
 │       │   ├── event_logs.rs     # Windows Event Log access
 │       │   ├── crash_logs.rs     # Multi-source log querying
@@ -268,6 +354,11 @@ Win11-AIO-Troubleshooter/
 │       │   ├── bsod_analyzer.rs  # Minidump + WER analysis
 │       │   ├── cli_tools.rs      # 24 CLI tool streaming executor
 │       │   ├── favorites.rs      # Persistent favorites (JSON)
+│       │   ├── hardware_health.rs # Hardware monitoring
+│       │   ├── health_score.rs   # System health scoring
+│       │   ├── startup_manager.rs # Startup item management
+│       │   ├── network_diagnostics.rs # Network tools
+│       │   ├── export.rs         # HTML report generation
 │       │   └── admin.rs          # Admin check, UAC relaunch
 │       ├── utils/powershell.rs   # PowerShell execution wrapper
 │       └── lib.rs                # Command registration

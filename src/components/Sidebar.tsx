@@ -14,9 +14,12 @@ import {
   Network,
   PanelLeftClose,
   PanelLeftOpen,
+  Sun,
+  Moon,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import FeatureGuide from "./FeatureGuide";
+import { useTheme } from "./Layout";
 
 interface SidebarProps {
   activePage: string;
@@ -71,6 +74,14 @@ const NAV_SECTIONS: NavSection[] = [
 export default function Sidebar({ activePage, onNavigate }: SidebarProps) {
   const [guideOpen, setGuideOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
+  const { theme, toggleTheme } = useTheme();
+
+  // Keyboard shortcut labels (matching SHORTCUT_PAGES in Layout)
+  const SHORTCUT_MAP: Record<string, string> = {
+    dashboard: "Ctrl+1", processes: "Ctrl+2", services: "Ctrl+3",
+    hardware: "Ctrl+4", network: "Ctrl+5", quicktools: "Ctrl+6",
+    startup: "Ctrl+7", eventviewer: "Ctrl+8", appinsights: "Ctrl+9",
+  };
 
   // Auto-collapse on narrow windows
   useEffect(() => {
@@ -129,7 +140,7 @@ export default function Sidebar({ activePage, onNavigate }: SidebarProps) {
                     key={item.id}
                     id={`nav-${item.id}`}
                     onClick={() => onNavigate(item.id)}
-                    title={collapsed ? item.label : undefined}
+                    title={collapsed ? `${item.label}${SHORTCUT_MAP[item.id] ? ` (${SHORTCUT_MAP[item.id]})` : ""}` : (SHORTCUT_MAP[item.id] || undefined)}
                     className={`
                       group relative flex items-center ${collapsed ? "justify-center" : "gap-3"} w-full h-[36px] ${collapsed ? "px-0" : "px-3"}
                       rounded-lg text-[13px] font-medium transition-all duration-200
@@ -168,18 +179,30 @@ export default function Sidebar({ activePage, onNavigate }: SidebarProps) {
         </nav>
 
         {/* Footer */}
-        <div className={`flex items-center ${collapsed ? "justify-center" : "justify-between"} px-3 pt-3 border-t border-white/[0.04]`}>
-          {!collapsed && <span className="text-[11px] text-white/20 font-mono tracking-wider">v2.0.0</span>}
-          <button
-            id="feature-guide-btn"
-            onClick={() => setGuideOpen(true)}
-            className="flex items-center justify-center w-7 h-7 rounded-md
-                       text-white/25 hover:text-accent hover:bg-accent/10
-                       transition-all duration-200"
-            title="Feature Guide"
-          >
-            <HelpCircle className="w-4 h-4" />
-          </button>
+        <div className={`flex items-center ${collapsed ? "flex-col gap-2" : "justify-between"} px-3 pt-3 border-t border-white/[0.04]`}>
+          {!collapsed && <span className="text-[11px] text-white/20 font-mono tracking-wider">v2.1.0</span>}
+          <div className={`flex items-center ${collapsed ? "flex-col" : ""} gap-1`}>
+            <button
+              id="theme-toggle-btn"
+              onClick={toggleTheme}
+              className="flex items-center justify-center w-7 h-7 rounded-md
+                         text-white/25 hover:text-accent hover:bg-accent/10
+                         transition-all duration-200"
+              title={theme === "dark" ? "Switch to Light Mode" : "Switch to Dark Mode"}
+            >
+              {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            </button>
+            <button
+              id="feature-guide-btn"
+              onClick={() => setGuideOpen(true)}
+              className="flex items-center justify-center w-7 h-7 rounded-md
+                         text-white/25 hover:text-accent hover:bg-accent/10
+                         transition-all duration-200"
+              title="Feature Guide"
+            >
+              <HelpCircle className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       </aside>
 

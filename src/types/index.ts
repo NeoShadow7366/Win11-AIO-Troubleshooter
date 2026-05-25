@@ -37,6 +37,8 @@ export interface ProcessInfo {
   memory_mb: number;
   status: string;
   path: string | null;
+  disk_read_bytes: number;
+  disk_write_bytes: number;
 }
 
 export interface ProcessDetails {
@@ -53,6 +55,7 @@ export interface ProcessDetails {
   start_time: string | null;
   description: string | null;
   company: string | null;
+  priority: string | null;
 }
 
 // ─── Services ───

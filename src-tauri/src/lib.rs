@@ -14,6 +14,7 @@ pub fn run() {
             commands::processes::get_process_details,
             commands::processes::get_process_icon,
             commands::processes::kill_process,
+            commands::processes::set_process_priority,
             // Services
             commands::services::get_services,
             commands::services::start_service,
@@ -56,6 +57,8 @@ pub fn run() {
             commands::network_diagnostics::traceroute_host,
             commands::network_diagnostics::dns_lookup,
             commands::network_diagnostics::get_wifi_info,
+            // Export
+            commands::export::generate_system_report,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

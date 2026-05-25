@@ -21,11 +21,31 @@ import {
   Hash,
   FileText,
   ChevronRight,
+  ChevronDown,
 } from "lucide-react";
 import type { ProcessInfo, ProcessDetails, FavoriteItem } from "../types";
+import { useToast } from "./ToastProvider";
 
-type SortKey = "pid" | "name" | "cpu_usage" | "memory_mb" | "status";
+type SortKey = "pid" | "name" | "cpu_usage" | "memory_mb" | "status" | "disk_io";
 type SortDir = "asc" | "desc";
+
+const PRIORITY_LEVELS = ["Idle", "BelowNormal", "Normal", "AboveNormal", "High", "Realtime"] as const;
+
+const PRIORITY_COLORS: Record<string, string> = {
+  Idle: "text-white/40 bg-white/[0.04]",
+  BelowNormal: "text-accent/70 bg-accent/10",
+  Normal: "text-success/80 bg-success/10",
+  AboveNormal: "text-warning/80 bg-warning/10",
+  High: "text-danger/80 bg-danger/10",
+  Realtime: "text-danger bg-danger/15",
+  RealTime: "text-danger bg-danger/15",
+};
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 export default function ProcessManager() {
   const [processes, setProcesses] = useState<ProcessInfo[]>([]);
@@ -48,13 +68,16 @@ export default function ProcessManager() {
 
   // Icon cache
   const [iconCache, setIconCache] = useState<Record<string, string>>({});
+  const { showToast } = useToast();
+  const [priorityDropdown, setPriorityDropdown] = useState(false);
 
   const fetchProcesses = useCallback(async () => {
     try {
       const data = await invoke<ProcessInfo[]>("get_processes");
       setProcesses(data);
-    } catch (err) {
-      console.error("Process fetch error:", err);
+    } catch (err: any) {
+      const msg = typeof err === "string" ? err : err?.message || "Failed to fetch processes";
+      showToast(msg, "error");
     } finally {
       setLoading(false);
     }
@@ -137,8 +160,10 @@ export default function ProcessManager() {
         setSelectedPid(null);
         setDetails(null);
       }
-    } catch (err) {
-      console.error("Kill error:", err);
+      showToast(`Killed ${killTarget.name} (PID ${killTarget.pid})`, "success");
+    } catch (err: any) {
+      const msg = typeof err === "string" ? err : err?.message || "Failed to kill process";
+      showToast(msg, "error");
     } finally {
       setKilling(false);
       setKillTarget(null);
@@ -180,6 +205,11 @@ export default function ProcessManager() {
   const filtered = processes
     .filter((p) => p.name.toLowerCase().includes(search.toLowerCase()))
     .sort((a, b) => {
+      if (sortKey === "disk_io") {
+        const aVal = a.disk_read_bytes + a.disk_write_bytes;
+        const bVal = b.disk_read_bytes + b.disk_write_bytes;
+        return sortDir === "asc" ? aVal - bVal : bVal - aVal;
+      }
       const aVal = a[sortKey];
       const bVal = b[sortKey];
       const cmp = typeof aVal === "string"
@@ -200,6 +230,7 @@ export default function ProcessManager() {
     { key: "name",      label: "Name",        width: "flex-1" },
     { key: "cpu_usage", label: "CPU %",       width: "w-[80px]",  align: "text-right" },
     { key: "memory_mb", label: "Memory (MB)", width: "w-[100px]", align: "text-right" },
+    { key: "disk_io",   label: "Disk I/O",    width: "w-[100px]", align: "text-right" },
     { key: "status",    label: "Status",      width: "w-[80px]" },
   ];
 
@@ -349,6 +380,9 @@ export default function ProcessManager() {
                     <span className="w-[100px] text-right font-mono text-[12px] tabular-nums text-white/60">
                       {proc.memory_mb.toFixed(1)}
                     </span>
+                    <span className="w-[100px] text-right font-mono text-[10px] tabular-nums text-white/40" title={`R: ${formatBytes(proc.disk_read_bytes)} / W: ${formatBytes(proc.disk_write_bytes)}`}>
+                      {formatBytes(proc.disk_read_bytes + proc.disk_write_bytes)}
+                    </span>
                     <span className="w-[80px]">
                       <span className={`inline-flex items-center h-5 px-2 rounded-full text-[10px] font-semibold
                         ${proc.status === "Running"
@@ -495,6 +529,51 @@ export default function ProcessManager() {
                   {details.start_time && (
                     <DetailField icon={<Clock className="w-3.5 h-3.5" />} label="Start Time" value={details.start_time} mono />
                   )}
+
+                  {/* Priority Control */}
+                  <div className="flex flex-col gap-1.5">
+                    <div className="flex items-center gap-1.5 text-white/35">
+                      <ChevronRight className="w-3.5 h-3.5" />
+                      <span className="text-[10px] font-semibold uppercase tracking-wider">Priority</span>
+                    </div>
+                    <div className="relative">
+                      <button
+                        onClick={() => setPriorityDropdown(!priorityDropdown)}
+                        className={`flex items-center justify-between w-full h-7 px-2.5 rounded-md text-[11px] font-medium
+                                   transition-all duration-200 border
+                                   ${PRIORITY_COLORS[details.priority || "Normal"] || "text-white/60 bg-white/[0.04]"}
+                                   border-white/10 hover:border-white/20`}
+                      >
+                        <span>{details.priority || "Normal"}</span>
+                        <ChevronDown className={`w-3 h-3 transition-transform ${priorityDropdown ? "rotate-180" : ""}`} />
+                      </button>
+                      {priorityDropdown && (
+                        <div className="absolute top-full left-0 right-0 mt-1 z-20 glass-panel-strong rounded-lg overflow-hidden py-1 shadow-xl">
+                          {PRIORITY_LEVELS.map((level) => (
+                            <button
+                              key={level}
+                              onClick={async () => {
+                                setPriorityDropdown(false);
+                                try {
+                                  await invoke("set_process_priority", { pid: details.pid, priority: level });
+                                  setDetails({ ...details, priority: level });
+                                  showToast(`Priority set to ${level}`, "success");
+                                } catch (err: any) {
+                                  const msg = typeof err === "string" ? err : err?.message || "Failed to set priority";
+                                  showToast(msg, "error");
+                                }
+                              }}
+                              className={`w-full text-left px-3 py-1.5 text-[11px] font-medium
+                                         transition-colors duration-150 hover:bg-white/[0.06]
+                                         ${(details.priority || "Normal") === level ? "text-accent" : "text-white/60"}`}
+                            >
+                              {level}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
               ) : (
                 <div className="text-center text-[12px] text-white/30 py-6">

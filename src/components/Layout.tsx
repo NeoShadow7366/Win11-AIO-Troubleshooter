@@ -14,6 +14,7 @@ import BsodAnalyzer from "./BsodAnalyzer";
 import HardwareHealth from "./HardwareHealth";
 import StartupManager from "./StartupManager";
 import NetworkDiagnostics from "./NetworkDiagnostics";
+import ExportButton from "./ExportButton";
 
 /* ─── Admin Context ─── */
 interface AdminContextType {
@@ -35,6 +36,33 @@ const NavigateContext = createContext<(page: string) => void>(() => {});
 
 export function useNavigate() {
   return useContext(NavigateContext);
+}
+
+/* ─── Theme Context ─── */
+export type Theme = "dark" | "light";
+
+interface ThemeContextType {
+  theme: Theme;
+  toggleTheme: () => void;
+}
+
+const THEME_STORAGE_KEY = "aio-theme";
+
+const ThemeContext = createContext<ThemeContextType>({
+  theme: "dark",
+  toggleTheme: () => {},
+});
+
+export function useTheme() {
+  return useContext(ThemeContext);
+}
+
+function getInitialTheme(): Theme {
+  try {
+    const saved = localStorage.getItem(THEME_STORAGE_KEY);
+    if (saved === "light" || saved === "dark") return saved;
+  } catch {}
+  return "dark";
 }
 
 function AdminPrompt({ onClose }: { onClose: () => void }) {
@@ -218,12 +246,34 @@ function KeepAlivePages({ activePage }: { activePage: string }) {
   );
 }
 
+/* ─── Keyboard shortcut page map ─── */
+const SHORTCUT_PAGES = [
+  "dashboard", "processes", "services", "hardware", "network",
+  "quicktools", "startup", "eventviewer", "appinsights",
+];
+
 export default function Layout({ activePage, onNavigate }: LayoutProps) {
   const [isAdmin, setIsAdmin] = useState(true); // Assume admin until checked
   const [adminChecked, setAdminChecked] = useState(false);
   const [showAdminPrompt, setShowAdminPrompt] = useState(false);
   const [bannerDismissed, setBannerDismissed] = useState(false);
   const [showPageInfo, setShowPageInfo] = useState(false);
+
+  // Theme state
+  const [theme, setTheme] = useState<Theme>(getInitialTheme);
+
+  const toggleTheme = useCallback(() => {
+    setTheme((prev) => {
+      const next = prev === "dark" ? "light" : "dark";
+      try { localStorage.setItem(THEME_STORAGE_KEY, next); } catch {}
+      return next;
+    });
+  }, []);
+
+  // Apply theme to document
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+  }, [theme]);
 
   useEffect(() => {
     invoke<boolean>("is_admin")
@@ -248,7 +298,42 @@ export default function Layout({ activePage, onNavigate }: LayoutProps) {
     setShowPageInfo(false);
   }, [activePage]);
 
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore if user is typing in an input
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+
+      // Ctrl+1 through Ctrl+9 → navigate to pages
+      if (e.ctrlKey && !e.shiftKey && !e.altKey) {
+        const num = parseInt(e.key);
+        if (num >= 1 && num <= 9 && SHORTCUT_PAGES[num - 1]) {
+          e.preventDefault();
+          onNavigate(SHORTCUT_PAGES[num - 1]);
+          return;
+        }
+        // Ctrl+/ → toggle page info
+        if (e.key === "/") {
+          e.preventDefault();
+          setShowPageInfo((prev) => !prev);
+          return;
+        }
+      }
+
+      // Escape → close modals/panels/popovers
+      if (e.key === "Escape") {
+        if (showPageInfo) { setShowPageInfo(false); return; }
+        if (showAdminPrompt) { setShowAdminPrompt(false); return; }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onNavigate, showPageInfo, showAdminPrompt]);
+
   return (
+    <ThemeContext.Provider value={{ theme, toggleTheme }}>
     <NavigateContext.Provider value={onNavigate}>
       <AdminContext.Provider value={{ isAdmin, promptAdmin }}>
       <div className="flex flex-col h-screen w-screen bg-bg-base overflow-hidden">
@@ -333,24 +418,27 @@ export default function Layout({ activePage, onNavigate }: LayoutProps) {
                   </div>
                 )}
               </div>
-              {adminChecked && (
-                <div className="flex items-center gap-1.5">
-                  {isAdmin ? (
-                    <>
-                      <ShieldCheck className="w-3.5 h-3.5 text-success/60" />
-                      <span className="text-[11px] text-success/50 font-medium">Admin</span>
-                    </>
-                  ) : (
-                    <button
-                      onClick={() => setShowAdminPrompt(true)}
-                      className="flex items-center gap-1.5 text-warning/50 hover:text-warning transition-colors"
-                    >
-                      <ShieldAlert className="w-3.5 h-3.5" />
-                      <span className="text-[11px] font-medium">Not Admin</span>
-                    </button>
-                  )}
-                </div>
-              )}
+              <div className="flex items-center gap-2">
+                {activePage === "dashboard" && <ExportButton />}
+                {adminChecked && (
+                  <div className="flex items-center gap-1.5">
+                    {isAdmin ? (
+                      <>
+                        <ShieldCheck className="w-3.5 h-3.5 text-success/60" />
+                        <span className="text-[11px] text-success/50 font-medium">Admin</span>
+                      </>
+                    ) : (
+                      <button
+                        onClick={() => setShowAdminPrompt(true)}
+                        className="flex items-center gap-1.5 text-warning/50 hover:text-warning transition-colors"
+                      >
+                        <ShieldAlert className="w-3.5 h-3.5" />
+                        <span className="text-[11px] font-medium">Not Admin</span>
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
             </header>
 
             {/* Scrollable Content */}
@@ -369,5 +457,6 @@ export default function Layout({ activePage, onNavigate }: LayoutProps) {
       </div>
       </AdminContext.Provider>
     </NavigateContext.Provider>
+    </ThemeContext.Provider>
   );
 }

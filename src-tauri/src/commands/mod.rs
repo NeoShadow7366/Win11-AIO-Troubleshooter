@@ -4,6 +4,7 @@ pub mod bsod_analyzer;
 pub mod cli_tools;
 pub mod crash_logs;
 pub mod event_logs;
+pub mod export;
 pub mod favorites;
 pub mod hardware_health;
 pub mod health_score;

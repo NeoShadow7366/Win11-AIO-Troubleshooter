@@ -11,6 +11,8 @@ pub struct ProcessInfo {
     pub memory_mb: f64,
     pub status: String,
     pub path: Option<String>,
+    pub disk_read_bytes: u64,
+    pub disk_write_bytes: u64,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -28,6 +30,7 @@ pub struct ProcessDetails {
     pub start_time: Option<String>,
     pub description: Option<String>,
     pub company: Option<String>,
+    pub priority: Option<String>,
 }
 
 /// Returns a list of all running processes with memory > 0.
@@ -57,6 +60,8 @@ pub async fn get_processes() -> Result<Vec<ProcessInfo>, String> {
 
                 let path = p.exe().map(|e| e.to_string_lossy().to_string());
 
+                let disk = p.disk_usage();
+
                 ProcessInfo {
                     pid: p.pid().as_u32(),
                     name: p.name().to_string_lossy().to_string(),
@@ -64,6 +69,8 @@ pub async fn get_processes() -> Result<Vec<ProcessInfo>, String> {
                     memory_mb: p.memory() as f64 / (1024.0 * 1024.0),
                     status: status_str.to_string(),
                     path,
+                    disk_read_bytes: disk.read_bytes,
+                    disk_write_bytes: disk.written_bytes,
                 }
             })
             .collect();
@@ -123,26 +130,30 @@ pub async fn get_process_details(pid: u32) -> Result<ProcessDetails, String> {
             }
         };
 
-        // Get description and company from the exe file properties via PowerShell
-        let (description, company) = if let Some(ref exe_path) = path {
+        // Get description, company, and priority via PowerShell
+        let (description, company, priority) = if let Some(ref exe_path) = path {
             let sanitized = exe_path.replace('\'', "''");
             let script = format!(
                 r#"$info = (Get-ItemProperty '{}' -ErrorAction SilentlyContinue)
 $ver = $info.VersionInfo
-[PSCustomObject]@{{ Description=$ver.FileDescription; Company=$ver.CompanyName }} | ConvertTo-Json"#,
-                sanitized
+$proc = Get-Process -Id {} -ErrorAction SilentlyContinue
+$pri = if ($proc) {{ $proc.PriorityClass }} else {{ '' }}
+[PSCustomObject]@{{ Description=$ver.FileDescription; Company=$ver.CompanyName; Priority=[string]$pri }} | ConvertTo-Json"#,
+                sanitized, pid
             );
             match run_powershell(&script) {
                 Ok(raw) if !raw.is_empty() => {
                     let parsed: serde_json::Value = serde_json::from_str(&raw).unwrap_or_default();
                     let desc = parsed.get("Description").and_then(|v| v.as_str()).map(String::from);
                     let comp = parsed.get("Company").and_then(|v| v.as_str()).map(String::from);
-                    (desc, comp)
+                    let pri = parsed.get("Priority").and_then(|v| v.as_str())
+                        .filter(|s| !s.is_empty()).map(String::from);
+                    (desc, comp, pri)
                 }
-                _ => (None, None),
+                _ => (None, None, None),
             }
         } else {
-            (None, None)
+            (None, None, None)
         };
 
         Ok(ProcessDetails {
@@ -159,6 +170,7 @@ $ver = $info.VersionInfo
             start_time,
             description,
             company,
+            priority,
         })
     })
     .await
@@ -222,6 +234,39 @@ pub async fn kill_process(pid: u32) -> Result<String, String> {
                 "Failed to kill process '{}' (PID: {}). It may require higher privileges or is a protected system process.",
                 name, pid
             ))
+        }
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+}
+
+/// Set process priority class.
+/// Valid levels: "Idle", "BelowNormal", "Normal", "AboveNormal", "High", "Realtime"
+#[tauri::command]
+pub async fn set_process_priority(pid: u32, priority: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        // Map friendly names to .NET PriorityClass enum values
+        let ps_priority = match priority.as_str() {
+            "Idle" => "Idle",
+            "BelowNormal" => "BelowNormal",
+            "Normal" => "Normal",
+            "AboveNormal" => "AboveNormal",
+            "High" => "High",
+            "Realtime" => "RealTime",
+            _ => return Err(format!("Invalid priority: {}", priority)),
+        };
+
+        let script = format!(
+            r#"$p = Get-Process -Id {} -ErrorAction Stop; $p.PriorityClass = '{}'; 'OK'"#,
+            pid, ps_priority
+        );
+
+        match run_powershell(&script) {
+            Ok(output) if output.contains("OK") => {
+                Ok(format!("Set PID {} priority to {}", pid, priority))
+            }
+            Ok(output) => Err(format!("Unexpected output: {}", output)),
+            Err(e) => Err(format!("Failed to set priority: {}", e)),
         }
     })
     .await

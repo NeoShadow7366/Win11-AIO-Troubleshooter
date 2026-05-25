@@ -31,6 +31,29 @@
   --animate-spin-slow: spin 2s linear infinite;
 }
 
+/* ─── Light Theme ─── */
+[data-theme="light"] {
+  --color-bg-base: #f0f2f5;
+  --color-bg-panel: rgba(255, 255, 255, 0.7);
+  --color-bg-card: rgba(0, 0, 0, 0.03);
+  --color-surface: rgba(0, 0, 0, 0.03);
+  --color-surface-hover: rgba(0, 0, 0, 0.06);
+  --color-text-primary: #1a1a2e;
+  --color-text-secondary: rgba(0, 0, 0, 0.55);
+  --color-text-tertiary: rgba(0, 0, 0, 0.35);
+  --color-accent: #0284c7;
+  --color-accent-dim: rgba(2, 132, 199, 0.12);
+  --color-accent-glow: rgba(2, 132, 199, 0.2);
+  --color-border: rgba(0, 0, 0, 0.08);
+  --color-border-light: rgba(0, 0, 0, 0.12);
+  --color-danger: #dc2626;
+  --color-danger-dim: rgba(220, 38, 38, 0.1);
+  --color-warning: #d97706;
+  --color-warning-dim: rgba(217, 119, 6, 0.1);
+  --color-success: #16a34a;
+  --color-success-dim: rgba(22, 163, 74, 0.1);
+}
+
 /* ─── Keyframes ─── */
 @keyframes pulse-glow {
   0%, 100% { opacity: 1; filter: drop-shadow(0 0 4px rgba(96, 205, 255, 0.2)); }
@@ -71,12 +94,13 @@ html, body, #root {
 }
 
 body {
-  background-color: #0a0a14;
-  color: #ffffff;
+  background-color: var(--color-bg-base);
+  color: var(--color-text-primary);
   font-family: "Segoe UI Variable", "Segoe UI", Inter, system-ui, -apple-system, sans-serif;
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 /* ─── Custom Scrollbar ─── */
@@ -248,4 +272,62 @@ table td, table th,
 
 @media (max-width: 900px) {
   .glass-panel { border-radius: 8px; }
+}
+
+/* ─── Light Theme Overrides ─── */
+[data-theme="light"] .glass-panel {
+  background: rgba(255, 255, 255, 0.65);
+  border-color: rgba(0, 0, 0, 0.08);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+[data-theme="light"] .glass-panel-strong {
+  background: rgba(255, 255, 255, 0.8);
+  border-color: rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+[data-theme="light"] .glass-input {
+  background: rgba(0, 0, 0, 0.04);
+  border-color: rgba(0, 0, 0, 0.12);
+  color: var(--color-text-primary);
+}
+
+[data-theme="light"] .glass-input:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 1px var(--color-accent-glow);
+  background: rgba(255, 255, 255, 0.9);
+}
+
+[data-theme="light"] .glass-input::placeholder {
+  color: rgba(0, 0, 0, 0.35);
+}
+
+[data-theme="light"] ::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+}
+
+[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.25);
+}
+
+[data-theme="light"] ::selection {
+  background: rgba(2, 132, 199, 0.25);
+  color: #1a1a2e;
+}
+
+[data-theme="light"] .shimmer {
+  background: linear-gradient(90deg, rgba(0,0,0,0.04) 25%, rgba(0,0,0,0.08) 50%, rgba(0,0,0,0.04) 75%);
+}
+
+[data-theme="light"] .terminal-output .stdout { color: #16a34a; }
+[data-theme="light"] .terminal-output .stderr { color: #dc2626; }
+[data-theme="light"] .terminal-output .info   { color: rgba(0,0,0,0.5); }
+
+[data-theme="light"] .terminal-resize-handle {
+  border-top-color: rgba(0, 0, 0, 0.06);
+}
+
+[data-theme="light"] .terminal-resize-handle::after {
+  background: rgba(0, 0, 0, 0.12);
 }
