@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { invoke, Channel } from "@tauri-apps/api/core";
 import { useAdmin } from "./Layout";
+import ConfirmDialog from "./ConfirmDialog";
 import {
   ShieldCheck,
   Wrench,
@@ -257,6 +258,32 @@ export default function QuickTools() {
   const terminalRef = useRef<HTMLDivElement>(null);
   const { isAdmin, promptAdmin } = useAdmin();
 
+  // Confirmation dialog state
+  const [confirmTool, setConfirmTool] = useState<{ tool: ToolDef; onComplete?: () => void } | null>(null);
+
+  const DESTRUCTIVE_TOOLS: Record<string, { title: string; message: string; variant: "danger" | "warning" }> = {
+    empty_recycle: {
+      title: "Empty Recycle Bin",
+      message: "This will permanently delete all items in the Recycle Bin across all drives. This action cannot be undone.",
+      variant: "danger",
+    },
+    clear_wucache: {
+      title: "Clear Update Cache",
+      message: "This will stop Windows Update services, delete all cached update files, and restart services. Updates will re-download when needed.",
+      variant: "warning",
+    },
+    component_cleanup: {
+      title: "Component Cleanup",
+      message: "This removes superseded Windows components to free disk space. This operation cannot be undone.",
+      variant: "warning",
+    },
+    mem_diag: {
+      title: "Memory Diagnostic",
+      message: "This will schedule a memory test and RESTART your computer immediately. Save all your work before proceeding!",
+      variant: "danger",
+    },
+  };
+
   // Healthcare routine state
   const [healthcareActive, setHealthcareActive] = useState(false);
   const [healthcareStep, setHealthcareStep] = useState(0);
@@ -278,26 +305,48 @@ export default function QuickTools() {
       return;
     }
 
+    // Check if tool needs confirmation
+    const destructiveConfig = DESTRUCTIVE_TOOLS[toolId];
+    if (destructiveConfig && !confirmTool) {
+      setConfirmTool({ tool: tool!, onComplete });
+      return;
+    }
+
     setRunningTool(toolId);
-    setOutput((prev) => [...prev, { type: "info", text: `\n▸ Running ${tool?.label || toolId}...` }]);
+    setOutput((prev) => {
+      const next = [...prev, { type: "info" as const, text: `\n▸ Running ${tool?.label || toolId}...` }];
+      return next.length > 1000 ? next.slice(-1000) : next;
+    });
 
     try {
       const onOutput = new Channel<CliOutput>();
       onOutput.onmessage = (msg: CliOutput) => {
         switch (msg.type) {
           case "Stdout":
-            setOutput((prev) => [...prev, { type: "stdout", text: msg.line }]);
+            setOutput((prev) => {
+              const next = [...prev, { type: "stdout" as const, text: msg.line }];
+              return next.length > 1000 ? next.slice(-1000) : next;
+            });
             break;
           case "Stderr":
-            setOutput((prev) => [...prev, { type: "stderr", text: msg.line }]);
+            setOutput((prev) => {
+              const next = [...prev, { type: "stderr" as const, text: msg.line }];
+              return next.length > 1000 ? next.slice(-1000) : next;
+            });
             break;
           case "Complete":
-            setOutput((prev) => [...prev, { type: "info", text: `✓ Process exited with code ${msg.exit_code}` }]);
+            setOutput((prev) => {
+              const next = [...prev, { type: "info" as const, text: `✓ Process exited with code ${msg.exit_code}` }];
+              return next.length > 1000 ? next.slice(-1000) : next;
+            });
             setRunningTool(null);
             onComplete?.();
             break;
           case "Error":
-            setOutput((prev) => [...prev, { type: "stderr", text: `Error: ${msg.message}` }]);
+            setOutput((prev) => {
+              const next = [...prev, { type: "stderr" as const, text: `Error: ${msg.message}` }];
+              return next.length > 1000 ? next.slice(-1000) : next;
+            });
             setRunningTool(null);
             onComplete?.();
             break;
@@ -305,7 +354,10 @@ export default function QuickTools() {
       };
       await invoke("run_cli_tool", { toolId, onOutput });
     } catch (err) {
-      setOutput((prev) => [...prev, { type: "stderr", text: `Failed to start: ${err}` }]);
+      setOutput((prev) => {
+        const next = [...prev, { type: "stderr" as const, text: `Failed to start: ${err}` }];
+        return next.length > 1000 ? next.slice(-1000) : next;
+      });
       setRunningTool(null);
       onComplete?.();
     }
@@ -370,6 +422,7 @@ export default function QuickTools() {
       : TOOLS.filter((t) => t.category === activeCategory);
 
   return (
+    <>
     <div className="flex flex-col gap-4 h-full animate-fade-in">
       {/* Category Tabs */}
       <div className="flex items-center gap-1.5 flex-wrap">
@@ -600,6 +653,24 @@ export default function QuickTools() {
         onClear={clearTerminal}
       />
     </div>
+
+    {/* Destructive Action Confirmation */}
+    {confirmTool && DESTRUCTIVE_TOOLS[confirmTool.tool.id] && (
+      <ConfirmDialog
+        open={true}
+        title={DESTRUCTIVE_TOOLS[confirmTool.tool.id].title}
+        message={DESTRUCTIVE_TOOLS[confirmTool.tool.id].message}
+        confirmLabel="Proceed"
+        variant={DESTRUCTIVE_TOOLS[confirmTool.tool.id].variant}
+        onCancel={() => setConfirmTool(null)}
+        onConfirm={() => {
+          const { tool, onComplete } = confirmTool;
+          setConfirmTool(null);
+          runTool(tool.id, onComplete);
+        }}
+      />
+    )}
+    </>
   );
 }
 
@@ -679,7 +750,7 @@ function TerminalPanel({
         </div>
       </div>
 
-      <div ref={terminalRef as React.RefObject<HTMLDivElement>} className="flex-1 overflow-y-auto p-4 bg-[#07070f]">
+      <div ref={terminalRef as React.RefObject<HTMLDivElement>} className="flex-1 overflow-y-auto p-4 bg-[var(--color-terminal-bg)]">
         {output.length === 0 ? (
           <div className="flex items-center justify-center h-full">
             <span className="text-[12px] text-white/15 font-mono">

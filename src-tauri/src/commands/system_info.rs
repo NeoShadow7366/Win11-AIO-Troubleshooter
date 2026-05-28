@@ -1,7 +1,8 @@
 use serde::Serialize;
-use std::thread;
-use std::time::Duration;
-use sysinfo::{Disks, System};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Instant;
+use sysinfo::{Disks, Networks, System};
+use tauri::State;
 
 use crate::utils::powershell::run_powershell;
 
@@ -18,6 +19,7 @@ pub struct DiskInfo {
 #[derive(Debug, Serialize, Clone)]
 pub struct SystemStats {
     pub cpu_usage: f32,
+    pub per_core_usage: Vec<f32>,
     pub ram_used: u64,
     pub ram_total: u64,
     pub disk_used: u64,
@@ -25,6 +27,8 @@ pub struct SystemStats {
     pub disks: Vec<DiskInfo>,
     pub internal_ip: String,
     pub external_ip: String,
+    pub net_rx_bytes: u64,
+    pub net_tx_bytes: u64,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -36,26 +40,52 @@ pub struct SystemSpecs {
     pub hostname: String,
 }
 
+// ─── External IP Cache (refresh every 60 seconds) ───
+
+static EXTERNAL_IP_CACHE: OnceLock<Mutex<(String, Instant)>> = OnceLock::new();
+
+fn get_cached_external_ip() -> String {
+    let cache = EXTERNAL_IP_CACHE.get_or_init(|| {
+        Mutex::new(("Fetching...".to_string(), Instant::now() - std::time::Duration::from_secs(120)))
+    });
+
+    let mut guard = cache.lock().unwrap_or_else(|e| e.into_inner());
+    if guard.1.elapsed().as_secs() >= 60 {
+        let ip = run_powershell(
+            r#"try { (Invoke-WebRequest -Uri 'https://api.ipify.org' -UseBasicParsing -TimeoutSec 3).Content } catch { 'Unavailable' }"#,
+        )
+        .unwrap_or_else(|_| "Unavailable".to_string());
+        *guard = (ip.clone(), Instant::now());
+        ip
+    } else {
+        guard.0.clone()
+    }
+}
+
 /// Returns live system statistics: CPU usage, RAM, per-disk info, and IP addresses.
-/// CPU measurement requires two refreshes with a short delay for accuracy.
+/// Uses shared System state — no sleep needed since the frontend polls every 2 seconds,
+/// providing a natural delta between refreshes.
 #[tauri::command]
-pub async fn get_system_stats() -> Result<SystemStats, String> {
-    // Run the blocking sysinfo work on a background thread
-    tokio::task::spawn_blocking(|| {
-        let mut sys = System::new();
+pub async fn get_system_stats(
+    sys_state: State<'_, Arc<Mutex<System>>>,
+) -> Result<SystemStats, String> {
+    let sys_arc = Arc::clone(&sys_state);
 
-        // First refresh to establish baseline
-        sys.refresh_cpu_usage();
-        thread::sleep(Duration::from_millis(200));
-        // Second refresh to get accurate delta-based CPU reading
-        sys.refresh_cpu_usage();
-        sys.refresh_memory();
+    tokio::task::spawn_blocking(move || {
+        // Lock, refresh, extract CPU/RAM, then drop the lock quickly
+        let (cpu_usage, per_core_usage, ram_used, ram_total) = {
+            let mut sys = sys_arc.lock().unwrap_or_else(|e| e.into_inner());
+            sys.refresh_cpu_usage();
+            sys.refresh_memory();
+            (
+                sys.global_cpu_usage(),
+                sys.cpus().iter().map(|c| c.cpu_usage()).collect::<Vec<f32>>(),
+                sys.used_memory(),
+                sys.total_memory(),
+            )
+        };
 
-        let cpu_usage = sys.global_cpu_usage();
-        let ram_used = sys.used_memory();
-        let ram_total = sys.total_memory();
-
-        // Enumerate each disk individually
+        // Enumerate each disk individually (not behind the lock)
         let sysinfo_disks = Disks::new_with_refreshed_list();
         let mut disk_total: u64 = 0;
         let mut disk_available: u64 = 0;
@@ -107,14 +137,20 @@ pub async fn get_system_stats() -> Result<SystemStats, String> {
         )
         .unwrap_or_else(|_| "Unavailable".to_string());
 
-        // Get external IP (with timeout)
-        let external_ip = run_powershell(
-            r#"try { (Invoke-WebRequest -Uri 'https://api.ipify.org' -UseBasicParsing -TimeoutSec 3).Content } catch { 'Unavailable' }"#,
-        )
-        .unwrap_or_else(|_| "Unavailable".to_string());
+        // Get external IP (cached — refreshes every 60 seconds)
+        let external_ip = get_cached_external_ip();
+
+        // Network throughput (total bytes since boot across all interfaces)
+        let networks = Networks::new_with_refreshed_list();
+        let (mut net_rx, mut net_tx) = (0u64, 0u64);
+        for (_name, data) in &networks {
+            net_rx += data.total_received();
+            net_tx += data.total_transmitted();
+        }
 
         Ok(SystemStats {
             cpu_usage,
+            per_core_usage,
             ram_used,
             ram_total,
             disk_used,
@@ -122,6 +158,8 @@ pub async fn get_system_stats() -> Result<SystemStats, String> {
             disks,
             internal_ip,
             external_ip,
+            net_rx_bytes: net_rx,
+            net_tx_bytes: net_tx,
         })
     })
     .await
@@ -130,16 +168,21 @@ pub async fn get_system_stats() -> Result<SystemStats, String> {
 
 /// Returns static system specifications: OS, CPU, GPU, uptime, hostname.
 #[tauri::command]
-pub async fn get_system_specs() -> Result<SystemSpecs, String> {
-    tokio::task::spawn_blocking(|| {
-        let sys = System::new_all();
+pub async fn get_system_specs(
+    sys_state: State<'_, Arc<Mutex<System>>>,
+) -> Result<SystemSpecs, String> {
+    let sys_arc = Arc::clone(&sys_state);
 
-        // CPU name
-        let cpu_name = sys
-            .cpus()
-            .first()
-            .map(|cpu| cpu.brand().to_string())
-            .unwrap_or_else(|| "Unknown CPU".to_string());
+    tokio::task::spawn_blocking(move || {
+        // Lock, refresh CPU list for brand info, extract, drop lock
+        let cpu_name = {
+            let mut sys = sys_arc.lock().unwrap_or_else(|e| e.into_inner());
+            sys.refresh_cpu_usage();
+            sys.cpus()
+                .first()
+                .map(|cpu| cpu.brand().to_string())
+                .unwrap_or_else(|| "Unknown CPU".to_string())
+        };
 
         // OS version
         let os_version = format!(

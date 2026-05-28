@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-shell";
 import {
@@ -22,9 +22,11 @@ import {
   FileText,
   ChevronRight,
   ChevronDown,
+  FolderOpen,
 } from "lucide-react";
 import type { ProcessInfo, ProcessDetails, FavoriteItem } from "../types";
 import { useToast } from "./ToastProvider";
+import { usePageVisible } from "./Layout";
 
 type SortKey = "pid" | "name" | "cpu_usage" | "memory_mb" | "status" | "disk_io";
 type SortDir = "asc" | "desc";
@@ -51,6 +53,7 @@ export default function ProcessManager() {
   const [processes, setProcesses] = useState<ProcessInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("cpu_usage");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [autoRefresh, setAutoRefresh] = useState(true);
@@ -70,6 +73,26 @@ export default function ProcessManager() {
   const [iconCache, setIconCache] = useState<Record<string, string>>({});
   const { showToast } = useToast();
   const [priorityDropdown, setPriorityDropdown] = useState(false);
+  const isVisible = usePageVisible('processes');
+
+  // Debounce search input
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search), 150);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  // Context menu
+  const [contextMenu, setContextMenu] = useState<{
+    x: number; y: number; proc: ProcessInfo;
+  } | null>(null);
+  const contextRef = useRef<HTMLDivElement>(null);
+
+  // Close context menu on click outside
+  useEffect(() => {
+    const handler = () => setContextMenu(null);
+    document.addEventListener("click", handler);
+    return () => document.removeEventListener("click", handler);
+  }, []);
 
   const fetchProcesses = useCallback(async () => {
     try {
@@ -98,13 +121,13 @@ export default function ProcessManager() {
   }, [fetchProcesses, fetchFavorites]);
 
   useEffect(() => {
-    if (autoRefresh) {
+    if (autoRefresh && isVisible) {
       intervalRef.current = setInterval(fetchProcesses, 3000);
     }
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [autoRefresh, fetchProcesses]);
+  }, [autoRefresh, fetchProcesses, isVisible]);
 
   // Load icon for a process path
   const loadIcon = useCallback(async (path: string) => {
@@ -202,8 +225,20 @@ export default function ProcessManager() {
     }
   };
 
-  const filtered = processes
-    .filter((p) => p.name.toLowerCase().includes(search.toLowerCase()))
+  const handleOpenFileLocation = async (proc: ProcessInfo) => {
+    if (!proc.path) {
+      showToast("No file path available for this process", "info");
+      return;
+    }
+    try {
+      await invoke("open_dump_folder", { path: proc.path });
+    } catch (err) {
+      showToast("Failed to open file location", "error");
+    }
+  };
+
+  const filtered = useMemo(() => processes
+    .filter((p) => p.name.toLowerCase().includes(debouncedSearch.toLowerCase()))
     .sort((a, b) => {
       if (sortKey === "disk_io") {
         const aVal = a.disk_read_bytes + a.disk_write_bytes;
@@ -216,7 +251,7 @@ export default function ProcessManager() {
         ? (aVal as string).localeCompare(bVal as string)
         : (aVal as number) - (bVal as number);
       return sortDir === "asc" ? cmp : -cmp;
-    });
+    }), [processes, debouncedSearch, sortKey, sortDir]);
 
   const SortIcon = ({ col }: { col: SortKey }) => {
     if (sortKey !== col) return <ArrowUpDown className="w-3 h-3 text-white/20" />;
@@ -352,6 +387,10 @@ export default function ProcessManager() {
                                    ? "bg-transparent hover:bg-white/[0.04]"
                                    : "bg-white/[0.015] hover:bg-white/[0.04]"
                                }`}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setContextMenu({ x: e.clientX, y: e.clientY, proc });
+                    }}
                   >
                     {/* Icon */}
                     <div className="w-[28px] flex items-center justify-center shrink-0">
@@ -627,6 +666,65 @@ export default function ProcessManager() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Context Menu */}
+      {contextMenu && (
+        <div
+          ref={contextRef}
+          className="fixed z-50 glass-panel-strong rounded-lg overflow-hidden py-1 shadow-2xl min-w-[180px]
+                     animate-fade-in border border-white/10"
+          style={{
+            left: Math.min(contextMenu.x, window.innerWidth - 200),
+            top: Math.min(contextMenu.y, window.innerHeight - 260),
+          }}
+        >
+          <button
+            onClick={() => { handleRowClick(contextMenu.proc); setContextMenu(null); }}
+            className="w-full flex items-center gap-2.5 px-3 py-2 text-[12px] text-white/70
+                       hover:bg-white/[0.06] transition-colors"
+          >
+            <Info className="w-3.5 h-3.5" /> View Details
+          </button>
+          <button
+            onClick={() => { handleToggleFavorite(contextMenu.proc); setContextMenu(null); }}
+            className="w-full flex items-center gap-2.5 px-3 py-2 text-[12px] text-white/70
+                       hover:bg-white/[0.06] transition-colors"
+          >
+            <Star className={`w-3.5 h-3.5 ${isFavorite(contextMenu.proc.name) ? "fill-warning text-warning" : ""}`} />
+            {isFavorite(contextMenu.proc.name) ? "Remove Favorite" : "Add Favorite"}
+          </button>
+          <div className="h-px bg-white/[0.06] my-1" />
+          {contextMenu.proc.path && (
+            <button
+              onClick={() => { handleOpenFileLocation(contextMenu.proc); setContextMenu(null); }}
+              className="w-full flex items-center gap-2.5 px-3 py-2 text-[12px] text-white/70
+                         hover:bg-white/[0.06] transition-colors"
+            >
+              <FolderOpen className="w-3.5 h-3.5" /> Open File Location
+            </button>
+          )}
+          <button
+            onClick={async () => {
+              const name = contextMenu.proc.name.replace(/\.exe$/i, "");
+              const q = encodeURIComponent(`What is ${name} Windows process`);
+              await open(`https://www.google.com/search?q=${q}`);
+              setContextMenu(null);
+            }}
+            className="w-full flex items-center gap-2.5 px-3 py-2 text-[12px] text-white/70
+                       hover:bg-white/[0.06] transition-colors"
+          >
+            <ExternalLink className="w-3.5 h-3.5" /> What is This?
+          </button>
+          <div className="h-px bg-white/[0.06] my-1" />
+          <button
+            onClick={() => { setKillTarget(contextMenu.proc); setContextMenu(null); }}
+            className="w-full flex items-center gap-2.5 px-3 py-2 text-[12px] text-danger/80
+                       hover:bg-danger/10 transition-colors"
+          >
+            <Trash2 className="w-3.5 h-3.5" /> Kill Process
+          </button>
         </div>
       )}
     </div>

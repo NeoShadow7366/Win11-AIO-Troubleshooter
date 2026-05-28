@@ -1,5 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { useToast } from "./ToastProvider";
+import { usePageVisible } from "./Layout";
 import {
   Thermometer,
   Cpu,
@@ -116,6 +118,9 @@ export default function HardwareHealth() {
   const [loading, setLoading] = useState(true);
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const { showToast } = useToast();
+  const errorShownRef = useRef(false);
+  const isVisible = usePageVisible('hardware');
 
   const fetchData = useCallback(async () => {
     try {
@@ -123,7 +128,10 @@ export default function HardwareHealth() {
       setData(result);
       setLastRefresh(new Date());
     } catch (err) {
-      console.error("Hardware health fetch error:", err);
+      if (!errorShownRef.current) {
+        showToast("Failed to load hardware health data", "error");
+        errorShownRef.current = true;
+      }
     } finally {
       setLoading(false);
     }
@@ -131,11 +139,13 @@ export default function HardwareHealth() {
 
   useEffect(() => {
     fetchData();
-    intervalRef.current = setInterval(fetchData, 5000);
+    if (isVisible) {
+      intervalRef.current = setInterval(fetchData, 5000);
+    }
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [fetchData]);
+  }, [fetchData, isVisible]);
 
   return (
     <div className="flex flex-col gap-6 animate-fade-in">

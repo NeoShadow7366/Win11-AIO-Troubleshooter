@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { useToast } from "./ToastProvider";
 import { open } from "@tauri-apps/plugin-shell";
 import { useAdmin } from "./Layout";
 import {
@@ -174,6 +175,7 @@ export default function StartupManager() {
   const [filterEnabled, setFilterEnabled] = useState<FilterEnabled>("all");
   const [search, setSearch] = useState("");
   const { isAdmin, promptAdmin } = useAdmin();
+  const { showToast } = useToast();
 
   const fetchItems = useCallback(async () => {
     setLoading(true);
@@ -181,7 +183,7 @@ export default function StartupManager() {
       const result = await invoke<StartupItem[]>("get_startup_items");
       setItems(result);
     } catch (err) {
-      console.error("Failed to load startup items:", err);
+      showToast("Failed to load startup items", "error");
     } finally {
       setLoading(false);
     }
@@ -220,8 +222,9 @@ export default function StartupManager() {
         location: item.location,
         enabled: !item.enabled,
       });
+      showToast(`${item.name} ${!item.enabled ? "enabled" : "disabled"} successfully`, "success");
     } catch (err) {
-      console.error("Toggle failed:", err);
+      showToast(`Failed to toggle ${item.name}`, "error");
       // Revert on failure
       setItems((prev) =>
         prev.map((i) =>
@@ -240,7 +243,7 @@ export default function StartupManager() {
     try {
       await open(`https://www.google.com/search?q=${query}`);
     } catch (err) {
-      console.error("Open URL error:", err);
+      showToast("Failed to open browser", "error");
     }
   };
 

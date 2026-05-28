@@ -16,6 +16,13 @@ import {
   PanelLeftOpen,
   Sun,
   Moon,
+  History,
+  CircuitBoard,
+  CalendarClock,
+  Package,
+  PieChart,
+  ShieldCheck,
+  CloudDownload,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import FeatureGuide from "./FeatureGuide";
@@ -51,13 +58,20 @@ const NAV_SECTIONS: NavSection[] = [
       { id: "services",    label: "Services",         icon: <Settings className="w-[18px] h-[18px]" /> },
       { id: "hardware",    label: "Hardware Health",   icon: <Thermometer className="w-[18px] h-[18px]" /> },
       { id: "network",     label: "Network Diag.",     icon: <Network className="w-[18px] h-[18px]" /> },
+      { id: "drivers",     label: "Driver Manager",    icon: <CircuitBoard className="w-[18px] h-[18px]" /> },
+      { id: "diskanalyzer", label: "Disk Analyzer",     icon: <PieChart className="w-[18px] h-[18px]" /> },
+      { id: "firewall",     label: "Firewall Rules",    icon: <ShieldCheck className="w-[18px] h-[18px]" /> },
     ],
   },
   {
     title: "Tools",
     items: [
-      { id: "quicktools",  label: "Quick Tools",      icon: <Wrench className="w-[18px] h-[18px]" /> },
-      { id: "startup",     label: "Startup Manager",  icon: <Power className="w-[18px] h-[18px]" /> },
+      { id: "quicktools",     label: "Quick Tools",      icon: <Wrench className="w-[18px] h-[18px]" /> },
+      { id: "startup",        label: "Startup Manager",  icon: <Power className="w-[18px] h-[18px]" /> },
+      { id: "restorepoints",  label: "Restore Points",   icon: <History className="w-[18px] h-[18px]" /> },
+      { id: "taskscheduler",   label: "Task Scheduler",   icon: <CalendarClock className="w-[18px] h-[18px]" /> },
+      { id: "programs",         label: "Programs",         icon: <Package className="w-[18px] h-[18px]" /> },
+      { id: "windowsupdate",     label: "Windows Update",   icon: <CloudDownload className="w-[18px] h-[18px]" /> },
     ],
   },
   {
@@ -182,6 +196,19 @@ export default function Sidebar({ activePage, onNavigate }: SidebarProps) {
         <div className={`flex items-center ${collapsed ? "flex-col gap-2" : "justify-between"} px-3 pt-3 border-t border-white/[0.04]`}>
           {!collapsed && <span className="text-[11px] text-white/20 font-mono tracking-wider">v2.1.0</span>}
           <div className={`flex items-center ${collapsed ? "flex-col" : ""} gap-1`}>
+            <button
+              id="settings-btn"
+              onClick={() => onNavigate("settings")}
+              className={`flex items-center justify-center w-7 h-7 rounded-md
+                         transition-all duration-200
+                         ${activePage === "settings"
+                           ? "text-accent bg-accent/10"
+                           : "text-white/25 hover:text-accent hover:bg-accent/10"
+                         }`}
+              title="Settings"
+            >
+              <Settings className="w-4 h-4" />
+            </button>
             <button
               id="theme-toggle-btn"
               onClick={toggleTheme}

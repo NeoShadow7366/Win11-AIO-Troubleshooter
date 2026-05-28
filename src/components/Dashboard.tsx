@@ -1,8 +1,11 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { useToast } from "./ToastProvider";
+import { usePageVisible } from "./Layout";
 import {
   Monitor, Cpu, HardDrive, Server, Clock, Globe, Wifi, Copy, Check,
   Heart, Shield, AlertTriangle, RefreshCw, MemoryStick, Rocket, ChevronRight,
+  ChevronDown, ChevronUp,
 } from "lucide-react";
 import type { SystemStats, SystemSpecs, DiskInfo } from "../types";
 
@@ -38,17 +41,19 @@ function getIcon(name: string) {
 }
 
 /* ─── Sparkline Component ─── */
-function Sparkline({ data, color, max, label, unit }: {
+function Sparkline({ data, color, max, label, unit, formatValue }: {
   data: number[];
   color: string;
   max: number;
   label: string;
   unit: string;
+  formatValue?: (v: number) => string;
 }) {
   const width = 280;
   const height = 48;
   const latest = data.length > 0 ? data[data.length - 1] : 0;
   const effectiveMax = max > 0 ? max : 100;
+  const displayValue = formatValue ? formatValue(latest) : `${latest.toFixed(1)}${unit}`;
 
   const points = data.map((v, i) => {
     const x = (i / Math.max(data.length - 1, 1)) * width;
@@ -65,7 +70,7 @@ function Sparkline({ data, color, max, label, unit }: {
       <div className="flex items-center justify-between mb-1.5">
         <span className="text-[11px] text-white/40 font-medium">{label}</span>
         <span className="text-[13px] font-bold tabular-nums" style={{ color }}>
-          {latest.toFixed(1)}{unit}
+          {displayValue}
         </span>
       </div>
       <svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
@@ -441,6 +446,12 @@ function bytesToGB(bytes: number): number {
   return bytes / (1024 * 1024 * 1024);
 }
 
+/* ─── Helper: format network speed ─── */
+function formatNetSpeed(kbps: number): string {
+  if (kbps >= 1024) return `${(kbps / 1024).toFixed(1)} MB/s`;
+  return `${kbps.toFixed(0)} KB/s`;
+}
+
 /* ─── Dashboard ─── */
 export default function Dashboard() {
   const [stats, setStats] = useState<SystemStats | null>(null);
@@ -448,20 +459,27 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [healthScore, setHealthScore] = useState<SystemHealthScore | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const { showToast } = useToast();
+  const errorShownRef = useRef(false);
+  const isVisible = usePageVisible('dashboard');
 
   // Performance history (60-second rolling window)
   const MAX_POINTS = 30;
   const [cpuHistory, setCpuHistory] = useState<number[]>([]);
   const [ramHistory, setRamHistory] = useState<number[]>([]);
+  const [netDownHistory, setNetDownHistory] = useState<number[]>([]);
+  const [netUpHistory, setNetUpHistory] = useState<number[]>([]);
+  const prevNetRef = useRef<{ rx: number; tx: number; time: number } | null>(null);
 
-  const fetchData = useCallback(async () => {
+  // Per-core CPU
+  const [perCoreUsage, setPerCoreUsage] = useState<number[]>([]);
+  const [showPerCore, setShowPerCore] = useState(false);
+
+  // Fetch only stats (called every 2s)
+  const fetchStats = useCallback(async () => {
     try {
-      const [s, sp] = await Promise.all([
-        invoke<SystemStats>("get_system_stats"),
-        invoke<SystemSpecs>("get_system_specs"),
-      ]);
+      const s = await invoke<SystemStats>("get_system_stats");
       setStats(s);
-      setSpecs(sp);
 
       // Update history
       setCpuHistory((prev) => [...prev.slice(-(MAX_POINTS - 1)), s.cpu_usage]);
@@ -469,27 +487,55 @@ export default function Dashboard() {
         const pct = s.ram_total > 0 ? (s.ram_used / s.ram_total) * 100 : 0;
         return [...prev.slice(-(MAX_POINTS - 1)), pct];
       });
+
+      // Network speed calculation (bytes/sec -> KB/s)
+      const now = Date.now();
+      if (prevNetRef.current) {
+        const dtSec = (now - prevNetRef.current.time) / 1000;
+        if (dtSec > 0) {
+          const downSpeed = (s.net_rx_bytes - prevNetRef.current.rx) / dtSec / 1024; // KB/s
+          const upSpeed = (s.net_tx_bytes - prevNetRef.current.tx) / dtSec / 1024;
+          setNetDownHistory((prev) => [...prev.slice(-(MAX_POINTS - 1)), Math.max(0, downSpeed)]);
+          setNetUpHistory((prev) => [...prev.slice(-(MAX_POINTS - 1)), Math.max(0, upSpeed)]);
+        }
+      }
+      prevNetRef.current = { rx: s.net_rx_bytes, tx: s.net_tx_bytes, time: now };
+
+      // Per-core CPU
+      if (s.per_core_usage) setPerCoreUsage(s.per_core_usage);
     } catch (err) {
-      console.error("Dashboard fetch error:", err);
+      if (!errorShownRef.current) {
+        showToast("Failed to fetch system stats", "error");
+        errorShownRef.current = true;
+      }
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  // Fetch specs once on mount (expensive, rarely changes)
+  useEffect(() => {
+    invoke<SystemSpecs>("get_system_specs")
+      .then(setSpecs)
+      .catch(() => {});
   }, []);
 
   // Fetch health score once on mount (it's expensive)
   useEffect(() => {
     invoke<SystemHealthScore>("get_health_score")
       .then(setHealthScore)
-      .catch((err) => console.error("Health score error:", err));
+      .catch(() => showToast("Failed to load health score", "error"));
   }, []);
 
   useEffect(() => {
-    fetchData();
-    intervalRef.current = setInterval(fetchData, 2000);
+    fetchStats();
+    if (isVisible) {
+      intervalRef.current = setInterval(fetchStats, 2000);
+    }
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [fetchData]);
+  }, [fetchStats, isVisible]);
 
   return (
     <div className="flex flex-col gap-6 animate-fade-in">
@@ -547,7 +593,79 @@ export default function Dashboard() {
           <div className="grid grid-cols-2 gap-3">
             <Sparkline data={cpuHistory} color="#60CDFF" max={100} label="CPU Usage" unit="%" />
             <Sparkline data={ramHistory} color="#2ed573" max={100} label="Memory Usage" unit="%" />
+            {netDownHistory.length > 2 && (
+              <Sparkline
+                data={netDownHistory}
+                color="#2ed573"
+                max={Math.max(...netDownHistory, 100)}
+                label="↓ Download"
+                unit=" KB/s"
+                formatValue={formatNetSpeed}
+              />
+            )}
+            {netUpHistory.length > 2 && (
+              <Sparkline
+                data={netUpHistory}
+                color="#ffa502"
+                max={Math.max(...netUpHistory, 100)}
+                label="↑ Upload"
+                unit=" KB/s"
+                formatValue={formatNetSpeed}
+              />
+            )}
           </div>
+        </section>
+      )}
+
+      {/* Per-Core CPU */}
+      {perCoreUsage.length > 0 && (
+        <section>
+          <button
+            onClick={() => setShowPerCore(!showPerCore)}
+            className="flex items-center gap-2 mb-3 px-1 group cursor-pointer"
+          >
+            <h2 className="text-[11px] font-semibold text-white/30 uppercase tracking-[0.12em]
+                           group-hover:text-white/50 transition-colors">
+              Per-Core CPU ({perCoreUsage.length} cores)
+            </h2>
+            {showPerCore
+              ? <ChevronUp className="w-3 h-3 text-white/25" />
+              : <ChevronDown className="w-3 h-3 text-white/25" />
+            }
+          </button>
+          {showPerCore && (
+            <div className="glass-panel p-4 animate-fade-in">
+              <div className={`grid gap-1.5 ${
+                perCoreUsage.length <= 8 ? "grid-cols-1" :
+                perCoreUsage.length <= 16 ? "grid-cols-2" : "grid-cols-3"
+              }`}>
+                {perCoreUsage.map((usage, i) => {
+                  const barColor =
+                    usage > 80 ? "bg-danger" : usage > 50 ? "bg-warning" : "bg-success";
+                  const glowColor =
+                    usage > 80 ? "shadow-danger/20" : usage > 50 ? "shadow-warning/20" : "shadow-success/20";
+                  return (
+                    <div key={i} className="flex items-center gap-2">
+                      <span className="text-[10px] font-mono text-white/30 w-6 text-right shrink-0">
+                        {i}
+                      </span>
+                      <div className="flex-1 h-3 bg-white/[0.04] rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all duration-500 shadow-sm ${barColor} ${glowColor}`}
+                          style={{ width: `${Math.min(usage, 100)}%` }}
+                        />
+                      </div>
+                      <span className={`text-[10px] font-mono tabular-nums w-10 text-right ${
+                        usage > 80 ? "text-danger" : usage > 50 ? "text-warning" : "text-white/40"
+                      }`}>
+                        {usage.toFixed(0)}%
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </section>
       )}
 

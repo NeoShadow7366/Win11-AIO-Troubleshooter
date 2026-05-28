@@ -7,6 +7,16 @@ pub struct EventLogEntry {
     pub source: String,
     pub message: String,
     pub event_id: u32,
+    #[serde(default)]
+    pub task_category: Option<String>,
+    #[serde(default)]
+    pub keywords: Option<String>,
+    #[serde(default)]
+    pub user: Option<String>,
+    #[serde(default)]
+    pub computer: Option<String>,
+    #[serde(default)]
+    pub opcode: Option<String>,
 }
 
 /// Raw deserialization from PowerShell output.
@@ -22,6 +32,16 @@ struct RawEventLogEntry {
     message: Option<String>,
     #[serde(alias = "EventId")]
     event_id: Option<u32>,
+    #[serde(alias = "TaskCategory")]
+    task_category: Option<String>,
+    #[serde(alias = "Keywords")]
+    keywords: Option<String>,
+    #[serde(alias = "User")]
+    user: Option<String>,
+    #[serde(alias = "Computer")]
+    computer: Option<String>,
+    #[serde(alias = "OpCode")]
+    opcode: Option<String>,
 }
 
 /// Retrieves Windows Event Log entries filtered by log name and severity level.
@@ -106,6 +126,11 @@ pub async fn get_event_logs(
                 source: raw.source.unwrap_or_else(|| "Unknown".to_string()),
                 message: raw.message.unwrap_or_default(),
                 event_id: raw.event_id.unwrap_or(0),
+                task_category: raw.task_category,
+                keywords: raw.keywords,
+                user: raw.user,
+                computer: raw.computer,
+                opcode: raw.opcode,
             })
             .collect();
 

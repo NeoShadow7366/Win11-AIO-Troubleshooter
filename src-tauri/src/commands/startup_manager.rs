@@ -26,6 +26,8 @@ struct PsRegistryItem {
     location: Option<String>,
     #[serde(alias = "Enabled", default)]
     enabled: Option<bool>,
+    #[serde(alias = "Publisher", default)]
+    publisher: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -92,9 +94,11 @@ pub async fn toggle_startup_item(
     .map_err(|e| format!("Task join error: {}", e))?
 }
 
-// ─── Registry Startup ───
+// ─── Registry Startup (publisher extracted inline) ───
 
 fn get_registry_startup() -> Result<Vec<StartupItem>, String> {
+    // Publisher extraction is done inline in the PowerShell script
+    // to avoid spawning a separate PowerShell process per item
     let script = r#"
 $items = @()
 $paths = @(
@@ -112,11 +116,25 @@ foreach ($path in $paths) {
             } | ForEach-Object {
                 $isDisabled = $_.Name.StartsWith('~DISABLED~')
                 $displayName = if ($isDisabled) { $_.Name.Substring(10) } else { $_.Name }
+                $cmd = $_.Value
+
+                # Extract publisher inline
+                $pub = $null
+                try {
+                    $exePath = $null
+                    if ($cmd -match '^"([^"]+)"') { $exePath = $Matches[1] }
+                    elseif ($cmd -match '^([^\s]+)') { $exePath = $Matches[1] }
+                    if ($exePath -and ($exePath -like '*\*' -or $exePath -like '*/*') -and (Test-Path $exePath -ErrorAction SilentlyContinue)) {
+                        $pub = (Get-Item $exePath -ErrorAction SilentlyContinue).VersionInfo.CompanyName
+                    }
+                } catch {}
+
                 $items += [PSCustomObject]@{
                     Name = $displayName
-                    Command = $_.Value
+                    Command = $cmd
                     Location = $path
                     Enabled = -not $isDisabled
+                    Publisher = if ($pub) { $pub } else { $null }
                 }
             }
         }
@@ -134,11 +152,10 @@ $items | ConvertTo-Json -Depth 3
             if name.is_empty() {
                 return None;
             }
-            let command = item.command;
-            let publisher = extract_publisher(command.as_deref());
+            let publisher = item.publisher.filter(|p| !p.is_empty());
             Some(StartupItem {
                 name,
-                command,
+                command: item.command,
                 location: item.location.unwrap_or_default(),
                 source: "Registry".to_string(),
                 enabled: item.enabled.unwrap_or(true),
@@ -148,7 +165,7 @@ $items | ConvertTo-Json -Depth 3
         .collect())
 }
 
-// ─── Startup Folder ───
+// ─── Startup Folder (publisher extracted inline) ───
 
 fn get_startup_folder() -> Result<Vec<StartupItem>, String> {
     let script = r#"
@@ -159,12 +176,28 @@ $common = [Environment]::GetFolderPath('CommonStartup')
     if ($_ -and (Test-Path $_)) {
         Get-ChildItem $_ -File -ErrorAction SilentlyContinue | ForEach-Object {
             $isDisabled = $_.Extension -eq '.disabled'
-            $displayName = if ($isDisabled) { $_.BaseName } else { $_.BaseName }
+            $displayName = $_.BaseName
+
+            # Extract publisher inline for .exe and .lnk files
+            $pub = $null
+            try {
+                if ($_.Extension -eq '.lnk') {
+                    $shell = New-Object -ComObject WScript.Shell
+                    $target = $shell.CreateShortcut($_.FullName).TargetPath
+                    if ($target -and (Test-Path $target -ErrorAction SilentlyContinue)) {
+                        $pub = (Get-Item $target -ErrorAction SilentlyContinue).VersionInfo.CompanyName
+                    }
+                } elseif ($_.Extension -eq '.exe') {
+                    $pub = $_.VersionInfo.CompanyName
+                }
+            } catch {}
+
             $items += [PSCustomObject]@{
                 Name = $displayName
                 Command = $_.FullName
                 Location = $_.DirectoryName
                 Enabled = -not $isDisabled
+                Publisher = if ($pub) { $pub } else { $null }
             }
         }
     }
@@ -178,13 +211,14 @@ $items | ConvertTo-Json -Depth 3
         .into_iter()
         .filter_map(|item| {
             let name = item.name?;
+            let publisher = item.publisher.filter(|p| !p.is_empty());
             Some(StartupItem {
                 name,
                 command: item.command,
                 location: item.location.unwrap_or_default(),
                 source: "StartupFolder".to_string(),
                 enabled: item.enabled.unwrap_or(true),
-                publisher: None,
+                publisher,
             })
         })
         .collect())
@@ -269,38 +303,4 @@ fn toggle_scheduled_task(name: &str, enabled: bool) -> Result<(), String> {
     );
 
     run_powershell(&script).map(|_| ())
-}
-
-// ─── Publisher extraction ───
-
-fn extract_publisher(command: Option<&str>) -> Option<String> {
-    let cmd = command?;
-    // Try to extract a simple exe path
-    let exe_path = if cmd.starts_with('"') {
-        cmd.split('"').nth(1)?
-    } else {
-        cmd.split_whitespace().next()?
-    };
-
-    // Only attempt if it looks like a real path
-    if !exe_path.contains('\\') && !exe_path.contains('/') {
-        return None;
-    }
-
-    let script = format!(
-        r#"try {{ (Get-Item '{}' -ErrorAction Stop).VersionInfo.CompanyName }} catch {{ '' }}"#,
-        exe_path
-    );
-
-    match run_powershell(&script) {
-        Ok(publisher) => {
-            let p = publisher.trim().to_string();
-            if p.is_empty() {
-                None
-            } else {
-                Some(p)
-            }
-        }
-        Err(_) => None,
-    }
 }

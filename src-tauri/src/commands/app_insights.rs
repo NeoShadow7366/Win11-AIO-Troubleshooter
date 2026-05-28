@@ -1,5 +1,7 @@
 use serde::Serialize;
+use std::sync::{Arc, Mutex};
 use sysinfo::System;
+use tauri::State;
 
 use crate::commands::event_logs::EventLogEntry;
 use crate::commands::processes::ProcessInfo;
@@ -17,53 +19,59 @@ pub struct AppInsightResult {
 /// Provides combined insight into an application: matching running processes and
 /// related event log entries. Also reports the executable path if found.
 #[tauri::command]
-pub async fn get_app_insights(name: String) -> Result<AppInsightResult, String> {
+pub async fn get_app_insights(
+    name: String,
+    sys_state: State<'_, Arc<Mutex<System>>>,
+) -> Result<AppInsightResult, String> {
     let name_clone = name.clone();
+    let sys_arc = Arc::clone(&sys_state);
 
     tokio::task::spawn_blocking(move || {
-        // --- Find matching processes ---
-        let mut sys = System::new();
-        sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
-        std::thread::sleep(std::time::Duration::from_millis(200));
-        sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+        // --- Find matching processes (lock, refresh, extract, drop lock) ---
+        let (mut processes, exe_path) = {
+            let mut sys = sys_arc.lock().unwrap_or_else(|e| e.into_inner());
+            sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
 
-        let search_lower = name_clone.to_lowercase();
+            let search_lower = name_clone.to_lowercase();
+            let mut exe_path: Option<String> = None;
+            let mut processes: Vec<ProcessInfo> = Vec::new();
 
-        let mut exe_path: Option<String> = None;
-        let mut processes: Vec<ProcessInfo> = Vec::new();
-
-        for p in sys.processes().values() {
-            let proc_name = p.name().to_string_lossy().to_string();
-            if proc_name.to_lowercase().contains(&search_lower) && p.memory() > 0 {
-                // Capture the exe path from the first matching process
-                if exe_path.is_none() {
-                    if let Some(path) = p.exe() {
-                        exe_path = Some(path.to_string_lossy().to_string());
+            for p in sys.processes().values() {
+                let proc_name = p.name().to_string_lossy().to_string();
+                if proc_name.to_lowercase().contains(&search_lower) && p.memory() > 0 {
+                    // Capture the exe path from the first matching process
+                    if exe_path.is_none() {
+                        if let Some(path) = p.exe() {
+                            exe_path = Some(path.to_string_lossy().to_string());
+                        }
                     }
+
+                    let status_str = match p.status() {
+                        sysinfo::ProcessStatus::Run => "Running",
+                        sysinfo::ProcessStatus::Sleep => "Sleeping",
+                        sysinfo::ProcessStatus::Stop => "Stopped",
+                        sysinfo::ProcessStatus::Zombie => "Zombie",
+                        _ => "Unknown",
+                    };
+
+                    let disk = p.disk_usage();
+
+                    processes.push(ProcessInfo {
+                        pid: p.pid().as_u32(),
+                        name: proc_name,
+                        cpu_usage: p.cpu_usage(),
+                        memory_mb: p.memory() as f64 / (1024.0 * 1024.0),
+                        status: status_str.to_string(),
+                        path: p.exe().map(|e| e.to_string_lossy().to_string()),
+                        disk_read_bytes: disk.read_bytes,
+                        disk_write_bytes: disk.written_bytes,
+                    });
                 }
-
-                let status_str = match p.status() {
-                    sysinfo::ProcessStatus::Run => "Running",
-                    sysinfo::ProcessStatus::Sleep => "Sleeping",
-                    sysinfo::ProcessStatus::Stop => "Stopped",
-                    sysinfo::ProcessStatus::Zombie => "Zombie",
-                    _ => "Unknown",
-                };
-
-                let disk = p.disk_usage();
-
-                processes.push(ProcessInfo {
-                    pid: p.pid().as_u32(),
-                    name: proc_name,
-                    cpu_usage: p.cpu_usage(),
-                    memory_mb: p.memory() as f64 / (1024.0 * 1024.0),
-                    status: status_str.to_string(),
-                    path: p.exe().map(|e| e.to_string_lossy().to_string()),
-                    disk_read_bytes: disk.read_bytes,
-                    disk_write_bytes: disk.written_bytes,
-                });
             }
-        }
+
+            (processes, exe_path)
+        };
+        // Lock is dropped here
 
         processes.sort_by(|a, b| {
             b.memory_mb
@@ -119,6 +127,7 @@ pub async fn get_app_insights(name: String) -> Result<AppInsightResult, String> 
         };
 
         // --- Find installation and appdata directories ---
+        let search_lower = name_clone.to_lowercase();
         let install_directory = find_app_directory(&search_lower, &[
             r"C:\Program Files",
             r"C:\Program Files (x86)",

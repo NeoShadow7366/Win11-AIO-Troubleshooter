@@ -11,6 +11,7 @@ export interface DiskInfo {
 
 export interface SystemStats {
   cpu_usage: number;
+  per_core_usage: number[];
   ram_used: number;
   ram_total: number;
   disk_used: number;
@@ -18,6 +19,8 @@ export interface SystemStats {
   disks: DiskInfo[];
   internal_ip: string;
   external_ip: string;
+  net_rx_bytes: number;
+  net_tx_bytes: number;
 }
 
 export interface SystemSpecs {
@@ -75,6 +78,11 @@ export interface EventLogEntry {
   source: string;
   event_id: number;
   message: string;
+  task_category?: string | null;
+  keywords?: string | null;
+  user?: string | null;
+  computer?: string | null;
+  opcode?: string | null;
 }
 
 export interface ServiceInsightResult {
@@ -154,4 +162,103 @@ export interface NavItem {
   id: string;
   label: string;
   icon: string;
+}
+
+// ─── Restore Points ───
+
+export interface RestorePoint {
+  sequence_number: number;
+  description: string;
+  creation_time: string;
+  restore_point_type: string;
+}
+
+// ─── Driver Manager ───
+
+export interface DriverInfo {
+  name: string;
+  device_name: string;
+  manufacturer: string;
+  status: string;
+  driver_version: string;
+  driver_date: string;
+  device_class: string;
+  inf_name: string;
+  is_signed: boolean;
+  has_problem: boolean;
+}
+
+// ─── Task Scheduler ───
+
+export interface ScheduledTaskInfo {
+  task_name: string;
+  task_path: string;
+  state: string;
+  description: string;
+  author: string;
+  trigger_type: string;
+  next_run_time: string;
+  last_run_time: string;
+  last_result: number;
+  command: string;
+}
+
+// ─── Installed Programs ───
+
+export interface InstalledProgram {
+  name: string;
+  version: string;
+  publisher: string;
+  install_date: string;
+  install_location: string;
+  estimated_size_kb: number;
+  uninstall_string: string;
+  is_system_component: boolean;
+}
+
+// ─── Disk Space Analyzer ───
+
+export interface DiskSpaceEntry {
+  name: string;
+  path: string;
+  size_bytes: number;
+  is_directory: boolean;
+  children: DiskSpaceEntry[] | null;
+}
+
+// ─── Firewall ───
+
+export interface FirewallRule {
+  name: string;
+  display_name: string;
+  direction: string;
+  action: string;
+  enabled: boolean;
+  profile: string;
+  protocol: string;
+  local_port: string;
+  remote_port: string;
+  remote_address: string;
+  program: string;
+}
+
+// ─── Windows Update ───
+
+export interface WindowsUpdateInfo {
+  title: string;
+  kb_article: string;
+  date: string;
+  status: string;
+  support_url: string;
+  description: string;
+  update_type: string;
+}
+
+export interface PendingUpdate {
+  title: string;
+  kb_article: string;
+  description: string;
+  is_downloaded: boolean;
+  is_mandatory: boolean;
+  size_mb: number;
 }

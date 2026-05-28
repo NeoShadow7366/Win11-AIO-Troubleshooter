@@ -7,6 +7,16 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig(async () => ({
   plugins: [react(), tailwindcss()],
   clearScreen: false,
+  build: {
+    target: "esnext",
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          "lucide": ["lucide-react"],
+        },
+      },
+    },
+  },
   server: {
     port: 1420,
     strictPort: true,

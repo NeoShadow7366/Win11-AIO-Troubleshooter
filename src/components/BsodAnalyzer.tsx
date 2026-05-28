@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { useToast } from "./ToastProvider";
 import { open } from "@tauri-apps/plugin-shell";
 import {
   RefreshCw,
@@ -26,6 +27,7 @@ export default function BsodAnalyzer() {
   const [bsods, setBsods] = useState<BsodRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const { isAdmin, promptAdmin } = useAdmin();
+  const { showToast } = useToast();
 
   // Selected dump analysis
   const [selectedDump, setSelectedDump] = useState<MinidumpInfo | null>(null);
@@ -43,7 +45,7 @@ export default function BsodAnalyzer() {
       setDumps(d);
       setBsods(b);
     } catch (err) {
-      console.error("BSOD fetch error:", err);
+      showToast("Failed to load BSOD data", "error");
     } finally {
       setLoading(false);
     }
@@ -67,7 +69,7 @@ export default function BsodAnalyzer() {
       const result = await invoke<DumpAnalysis>("analyze_dump", { dumpFile: dump.full_path });
       setAnalysis(result);
     } catch (err) {
-      console.error("Dump analysis error:", err);
+      showToast("Failed to analyze dump file", "error");
     } finally {
       setAnalyzing(false);
     }
@@ -135,6 +137,53 @@ export default function BsodAnalyzer() {
           <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
         </button>
       </div>
+
+      {/* BSOD Crash Timeline */}
+      {!loading && bsods.length > 1 && (() => {
+        // Group by month
+        const monthMap = new Map<string, number>();
+        bsods.forEach((b) => {
+          const d = new Date(b.date);
+          const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+          monthMap.set(key, (monthMap.get(key) || 0) + 1);
+        });
+        const months = Array.from(monthMap.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+        const maxCount = Math.max(...months.map(([, c]) => c));
+
+        return (
+          <div className="glass-panel p-4">
+            <h3 className="text-[11px] font-semibold text-white/30 uppercase tracking-wider mb-3">
+              Crash Frequency
+            </h3>
+            <div className="flex items-end gap-1 h-16">
+              {months.map(([month, count]) => {
+                const pct = maxCount > 0 ? (count / maxCount) * 100 : 0;
+                const color = count >= 3 ? "#ff4757" : count >= 2 ? "#ffa502" : "#60CDFF";
+                return (
+                  <div key={month} className="flex-1 flex flex-col items-center gap-1 group" title={`${month}: ${count} crash${count !== 1 ? "es" : ""}`}>
+                    <span className="text-[9px] text-white/0 group-hover:text-white/50 transition-colors tabular-nums">
+                      {count}
+                    </span>
+                    <div className="w-full flex flex-col justify-end" style={{ height: "40px" }}>
+                      <div
+                        className="w-full rounded-t transition-all duration-500"
+                        style={{
+                          height: `${Math.max(pct, 8)}%`,
+                          backgroundColor: color,
+                          opacity: 0.8,
+                        }}
+                      />
+                    </div>
+                    <span className="text-[8px] text-white/25 tabular-nums">
+                      {month.slice(5)}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
 
       {loading ? (
         <div className="flex flex-col gap-4 flex-1">

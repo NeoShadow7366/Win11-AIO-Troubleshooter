@@ -1,20 +1,33 @@
-import { useEffect, useState, useCallback, createContext, useContext } from "react";
+import React, { useEffect, useState, useCallback, useMemo, createContext, useContext, Suspense } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { ShieldAlert, ShieldCheck, X, Info } from "lucide-react";
+import { open } from "@tauri-apps/plugin-shell";
+import { ShieldAlert, ShieldCheck, X, Info, ArrowUpCircle } from "lucide-react";
+import { useToast } from "./ToastProvider";
+import { checkForUpdates, type UpdateInfo } from "../utils/updateChecker";
 import TitleBar from "./TitleBar";
 import Sidebar from "./Sidebar";
 import Dashboard from "./Dashboard";
-import ProcessManager from "./ProcessManager";
-import ServicesManager from "./ServicesManager";
-import EventViewer from "./EventViewer";
-import AppInsights from "./AppInsights";
-import ServiceInsights from "./ServiceInsights";
-import QuickTools from "./QuickTools";
-import BsodAnalyzer from "./BsodAnalyzer";
-import HardwareHealth from "./HardwareHealth";
-import StartupManager from "./StartupManager";
-import NetworkDiagnostics from "./NetworkDiagnostics";
 import ExportButton from "./ExportButton";
+
+/* ─── Lazy-loaded page components ─── */
+const ProcessManager = React.lazy(() => import("./ProcessManager"));
+const ServicesManager = React.lazy(() => import("./ServicesManager"));
+const EventViewer = React.lazy(() => import("./EventViewer"));
+const AppInsights = React.lazy(() => import("./AppInsights"));
+const ServiceInsights = React.lazy(() => import("./ServiceInsights"));
+const QuickTools = React.lazy(() => import("./QuickTools"));
+const BsodAnalyzer = React.lazy(() => import("./BsodAnalyzer"));
+const HardwareHealth = React.lazy(() => import("./HardwareHealth"));
+const StartupManager = React.lazy(() => import("./StartupManager"));
+const NetworkDiagnostics = React.lazy(() => import("./NetworkDiagnostics"));
+const SettingsPage = React.lazy(() => import("./SettingsPage"));
+const RestorePoints = React.lazy(() => import("./RestorePoints"));
+const DriverManager = React.lazy(() => import("./DriverManager"));
+const TaskScheduler = React.lazy(() => import("./TaskScheduler"));
+const InstalledPrograms = React.lazy(() => import("./InstalledPrograms"));
+const DiskAnalyzer = React.lazy(() => import("./DiskAnalyzer"));
+const FirewallViewer = React.lazy(() => import("./FirewallViewer"));
+const WindowsUpdate = React.lazy(() => import("./WindowsUpdate"));
 
 /* ─── Admin Context ─── */
 interface AdminContextType {
@@ -36,6 +49,14 @@ const NavigateContext = createContext<(page: string) => void>(() => {});
 
 export function useNavigate() {
   return useContext(NavigateContext);
+}
+
+/* ─── Page Visibility Context ─── */
+const PageVisibilityContext = createContext<string>("dashboard");
+
+export function usePageVisible(pageId: string): boolean {
+  const activePage = useContext(PageVisibilityContext);
+  return activePage === pageId;
 }
 
 /* ─── Theme Context ─── */
@@ -181,6 +202,14 @@ const PAGE_TITLES: Record<string, string> = {
   hardware:        "Hardware Health",
   startup:         "Startup Manager",
   network:         "Network Diagnostics",
+  settings:        "Settings",
+  restorepoints:   "Restore Points",
+  drivers:         "Driver Manager",
+  taskscheduler:   "Task Scheduler",
+  programs:        "Installed Programs",
+  diskanalyzer:    "Disk Analyzer",
+  firewall:        "Firewall Rules",
+  windowsupdate:   "Windows Update",
 };
 
 const PAGE_DESCRIPTIONS: Record<string, string> = {
@@ -195,6 +224,14 @@ const PAGE_DESCRIPTIONS: Record<string, string> = {
   hardware:        "Monitor hardware health: CPU temperatures, GPU stats (NVIDIA), memory modules, and disk S.M.A.R.T. data including wear level and power-on hours. Data auto-refreshes every 5 seconds. Some sensors require administrator privileges.",
   startup:         "Manage programs that start automatically with Windows. Toggle items on/off from Registry, Startup Folder, and Scheduled Tasks. View color-coded startup impact ratings (High, Medium, Low). Use 'What is this?' to look up unknown entries. HKLM and scheduled task changes require admin.",
   network:         "Network diagnostic tools: view active TCP connections with process names, run ping and traceroute tests, perform DNS lookups, and check WiFi signal info. Use the tabs to switch between tools.",
+  settings:        "Configure application preferences including refresh intervals, default network settings, theme, and more.",
+  restorepoints:   "View and manage Windows System Restore points. See existing restore points with creation dates and types. Create new restore points or restore your system to a previous state. Requires administrator privileges.",
+  drivers:         "View all installed device drivers. Filter by device class or status. See driver version, signing status, and identify problem devices. Click any driver for detailed information.",
+  taskscheduler:   "Browse and manage all Windows scheduled tasks. Filter by state and trigger type. Enable/disable tasks, run them on demand, and view last run results. Requires administrator for modifications.",
+  programs:        "View all installed programs with version, publisher, and size. Search and filter the list. Uninstall programs with confirmation. Toggle system component visibility.",
+  diskanalyzer:    "Analyze disk space usage across your drives. Visual treemap shows space distribution. Drill down into folders to find large files. Navigate with breadcrumbs.",
+  firewall:        "View Windows Firewall inbound and outbound rules. Filter by direction, action, and enabled state. See port, protocol, and program details for each rule.",
+  windowsupdate:   "View Windows Update history and check for pending updates. See installation status, KB articles, and support links. Filter by status.",
 };
 
 const PAGE_COMPONENTS: Record<string, React.ComponentType> = {
@@ -209,7 +246,30 @@ const PAGE_COMPONENTS: Record<string, React.ComponentType> = {
   hardware: HardwareHealth,
   startup: StartupManager,
   network: NetworkDiagnostics,
+  settings: SettingsPage,
+  restorepoints: RestorePoints,
+  drivers: DriverManager,
+  taskscheduler: TaskScheduler,
+  programs: InstalledPrograms,
+  diskanalyzer: DiskAnalyzer,
+  firewall: FirewallViewer,
+  windowsupdate: WindowsUpdate,
 };
+
+/* ─── Page Loading Fallback ─── */
+function PageFallback() {
+  return (
+    <div className="flex flex-col gap-4 p-2 animate-fade-in">
+      <div className="h-8 w-48 shimmer" />
+      <div className="grid grid-cols-3 gap-4">
+        <div className="h-32 shimmer" />
+        <div className="h-32 shimmer" />
+        <div className="h-32 shimmer" />
+      </div>
+      <div className="h-64 shimmer" />
+    </div>
+  );
+}
 
 /**
  * Keep-alive page container. Pages are mounted on first visit and kept alive
@@ -238,7 +298,9 @@ function KeepAlivePages({ activePage }: { activePage: string }) {
             key={pageId}
             className={isActive ? "flex flex-col flex-1 min-h-0 animate-fade-in" : "hidden"}
           >
-            <Component />
+            <Suspense fallback={<PageFallback />}>
+              <Component />
+            </Suspense>
           </div>
         );
       })}
@@ -258,6 +320,8 @@ export default function Layout({ activePage, onNavigate }: LayoutProps) {
   const [showAdminPrompt, setShowAdminPrompt] = useState(false);
   const [bannerDismissed, setBannerDismissed] = useState(false);
   const [showPageInfo, setShowPageInfo] = useState(false);
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+  const { showToast } = useToast();
 
   // Theme state
   const [theme, setTheme] = useState<Theme>(getInitialTheme);
@@ -286,6 +350,16 @@ export default function Layout({ activePage, onNavigate }: LayoutProps) {
         setAdminChecked(true);
       });
   }, []);
+
+  // Auto-update check
+  useEffect(() => {
+    checkForUpdates().then((info) => {
+      if (info?.isNewer) {
+        setUpdateInfo(info);
+        showToast(`Update available: v${info.latestVersion}`, "info");
+      }
+    });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const promptAdmin = useCallback(() => {
     if (!isAdmin) {
@@ -332,10 +406,14 @@ export default function Layout({ activePage, onNavigate }: LayoutProps) {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [onNavigate, showPageInfo, showAdminPrompt]);
 
+  const adminValue = useMemo(() => ({ isAdmin, promptAdmin }), [isAdmin, promptAdmin]);
+  const themeValue = useMemo(() => ({ theme, toggleTheme }), [theme, toggleTheme]);
+
   return (
-    <ThemeContext.Provider value={{ theme, toggleTheme }}>
+    <ThemeContext.Provider value={themeValue}>
+    <PageVisibilityContext.Provider value={activePage}>
     <NavigateContext.Provider value={onNavigate}>
-      <AdminContext.Provider value={{ isAdmin, promptAdmin }}>
+      <AdminContext.Provider value={adminValue}>
       <div className="flex flex-col h-screen w-screen bg-bg-base overflow-hidden">
         {/* Title Bar */}
         <TitleBar />
@@ -419,6 +497,19 @@ export default function Layout({ activePage, onNavigate }: LayoutProps) {
                 )}
               </div>
               <div className="flex items-center gap-2">
+                {/* Update badge */}
+                {updateInfo && (
+                  <button
+                    onClick={() => open(updateInfo.downloadUrl).catch(() => {})}
+                    className="flex items-center gap-1.5 h-7 px-3 rounded-lg text-[11px] font-medium
+                               bg-accent/10 text-accent border border-accent/20
+                               hover:bg-accent/15 transition-all duration-200 animate-fade-in"
+                    title={`Update to v${updateInfo.latestVersion}`}
+                  >
+                    <ArrowUpCircle className="w-3.5 h-3.5" />
+                    v{updateInfo.latestVersion} Available
+                  </button>
+                )}
                 {activePage === "dashboard" && <ExportButton />}
                 {adminChecked && (
                   <div className="flex items-center gap-1.5">
@@ -457,6 +548,7 @@ export default function Layout({ activePage, onNavigate }: LayoutProps) {
       </div>
       </AdminContext.Provider>
     </NavigateContext.Provider>
+    </PageVisibilityContext.Provider>
     </ThemeContext.Provider>
   );
 }

@@ -66,8 +66,18 @@ struct PsThermalZone {
     temperature: Option<f64>,
 }
 
+// ─── Combined hardware health result from single PS script ───
+
+#[derive(Debug, Deserialize, Default)]
+struct PsCombinedHealth {
+    #[serde(alias = "Disks", default)]
+    disks: Option<Vec<PsCombinedDisk>>,
+    #[serde(alias = "Ram", default)]
+    ram: Option<Vec<PsCombinedRam>>,
+}
+
 #[derive(Debug, Deserialize)]
-struct PsPhysicalDisk {
+struct PsCombinedDisk {
     #[serde(alias = "FriendlyName", default)]
     friendly_name: Option<String>,
     #[serde(alias = "MediaType", default)]
@@ -78,13 +88,6 @@ struct PsPhysicalDisk {
     operational_status: Option<String>,
     #[serde(alias = "Size", default)]
     size: Option<u64>,
-}
-
-#[derive(Debug, Deserialize)]
-#[allow(dead_code)]
-struct PsReliabilityCounter {
-    #[serde(alias = "DeviceId", default)]
-    device_id: Option<String>,
     #[serde(alias = "Temperature", default)]
     temperature: Option<f64>,
     #[serde(alias = "PowerOnHours", default)]
@@ -98,7 +101,7 @@ struct PsReliabilityCounter {
 }
 
 #[derive(Debug, Deserialize)]
-struct PsRamModule {
+struct PsCombinedRam {
     #[serde(alias = "Manufacturer", default)]
     manufacturer: Option<String>,
     #[serde(alias = "Speed", default)]
@@ -112,10 +115,14 @@ struct PsRamModule {
 #[tauri::command]
 pub async fn get_hardware_health() -> Result<HardwareHealth, String> {
     tokio::task::spawn_blocking(|| {
+        // Batch disk health + RAM info into a single PowerShell call
+        let (disk_health, ram_info) = get_disk_and_ram();
+
+        // CPU temps use fallback logic (3 methods), keep separate
         let cpu_temps = get_cpu_temps();
+
+        // GPU info uses nvidia-smi, keep separate
         let gpu_info = get_gpu_info();
-        let disk_health = get_disk_health();
-        let ram_info = get_ram_info();
 
         Ok(HardwareHealth {
             cpu_temps,
@@ -126,6 +133,95 @@ pub async fn get_hardware_health() -> Result<HardwareHealth, String> {
     })
     .await
     .map_err(|e| format!("Task join error: {}", e))?
+}
+
+/// Combined disk health + RAM info in a single PowerShell invocation
+fn get_disk_and_ram() -> (Vec<DiskHealthInfo>, RamHealthInfo) {
+    let script = r#"
+$result = @{}
+
+# Disk health with reliability counters joined
+try {
+    $physDisks = @(Get-PhysicalDisk -ErrorAction Stop)
+    $counters = @{}
+    try {
+        Get-PhysicalDisk -ErrorAction SilentlyContinue |
+            Get-StorageReliabilityCounter -ErrorAction SilentlyContinue |
+            ForEach-Object { $counters[[string]$_.DeviceId] = $_ }
+    } catch {}
+
+    $diskList = @()
+    foreach ($d in $physDisks) {
+        $c = $counters[[string]$d.DeviceId]
+        $diskList += [PSCustomObject]@{
+            FriendlyName      = $d.FriendlyName
+            MediaType         = [string]$d.MediaType
+            HealthStatus      = [string]$d.HealthStatus
+            OperationalStatus = [string]$d.OperationalStatus
+            Size              = $d.Size
+            Temperature       = if ($c) { $c.Temperature } else { $null }
+            PowerOnHours      = if ($c) { $c.PowerOnHours } else { $null }
+            ReadErrorsTotal   = if ($c) { $c.ReadErrorsTotal } else { $null }
+            WriteErrorsTotal  = if ($c) { $c.WriteErrorsTotal } else { $null }
+            Wear              = if ($c) { $c.Wear } else { $null }
+        }
+    }
+    $result['Disks'] = $diskList
+} catch {
+    $result['Disks'] = @()
+}
+
+# RAM modules
+try {
+    $result['Ram'] = @(Get-CimInstance Win32_PhysicalMemory -ErrorAction Stop |
+        Select-Object Manufacturer, Speed, Capacity)
+} catch {
+    $result['Ram'] = @()
+}
+
+$result | ConvertTo-Json -Depth 4 -Compress
+"#;
+
+    let output = run_powershell(script).unwrap_or_default();
+    let data: PsCombinedHealth = serde_json::from_str(output.trim()).unwrap_or_default();
+
+    // Parse disks
+    let disk_health: Vec<DiskHealthInfo> = data.disks.unwrap_or_default()
+        .into_iter()
+        .map(|d| DiskHealthInfo {
+            name: d.friendly_name.unwrap_or_else(|| "Unknown Disk".to_string()),
+            media_type: d.media_type.unwrap_or_else(|| "Unknown".to_string()),
+            health_status: d.health_status.unwrap_or_else(|| "Unknown".to_string()),
+            operational_status: d.operational_status.unwrap_or_else(|| "Unknown".to_string()),
+            size_bytes: d.size.unwrap_or(0),
+            temperature_c: d.temperature,
+            power_on_hours: d.power_on_hours,
+            read_errors: d.read_errors_total,
+            write_errors: d.write_errors_total,
+            wear_percentage: d.wear,
+        })
+        .collect();
+
+    // Parse RAM
+    let ram_modules: Vec<RamModule> = data.ram.unwrap_or_default()
+        .into_iter()
+        .map(|m| RamModule {
+            manufacturer: m.manufacturer.unwrap_or_else(|| "Unknown".to_string()).trim().to_string(),
+            speed_mhz: m.speed.unwrap_or(0),
+            capacity_bytes: m.capacity.unwrap_or(0),
+        })
+        .collect();
+
+    let total_capacity: u64 = ram_modules.iter().map(|m| m.capacity_bytes).sum();
+    let speed = ram_modules.first().map(|m| m.speed_mhz).unwrap_or(0);
+
+    let ram_info = RamHealthInfo {
+        modules: ram_modules,
+        total_capacity_bytes: total_capacity,
+        speed_mhz: speed,
+    };
+
+    (disk_health, ram_info)
 }
 
 fn get_cpu_temps() -> Vec<CpuTempInfo> {
@@ -242,73 +338,4 @@ fn get_gpu_info() -> Option<GpuHealthInfo> {
     }
 
     None
-}
-
-// ─── Disk Health (S.M.A.R.T.) ───
-
-fn get_disk_health() -> Vec<DiskHealthInfo> {
-    // Get physical disk list
-    let disks: Vec<PsPhysicalDisk> = run_powershell_json(
-        r#"@(Get-PhysicalDisk -ErrorAction Stop | Select-Object FriendlyName, MediaType, HealthStatus, OperationalStatus, Size) | ConvertTo-Json -Depth 3"#,
-    )
-    .unwrap_or_default();
-
-    // Get reliability counters (may fail on some drives)
-    let counters: Vec<PsReliabilityCounter> = run_powershell_json(
-        r#"@(Get-PhysicalDisk -ErrorAction SilentlyContinue | Get-StorageReliabilityCounter -ErrorAction SilentlyContinue | Select-Object DeviceId, Temperature, PowerOnHours, ReadErrorsTotal, WriteErrorsTotal, Wear) | ConvertTo-Json -Depth 3"#,
-    )
-    .unwrap_or_default();
-
-    disks
-        .into_iter()
-        .enumerate()
-        .map(|(i, disk)| {
-            let counter = counters.get(i);
-            DiskHealthInfo {
-                name: disk.friendly_name.unwrap_or_else(|| format!("Disk {i}")),
-                media_type: disk.media_type.unwrap_or_else(|| "Unknown".to_string()),
-                health_status: disk.health_status.unwrap_or_else(|| "Unknown".to_string()),
-                operational_status: disk
-                    .operational_status
-                    .unwrap_or_else(|| "Unknown".to_string()),
-                size_bytes: disk.size.unwrap_or(0),
-                temperature_c: counter.and_then(|c| c.temperature),
-                power_on_hours: counter.and_then(|c| c.power_on_hours),
-                read_errors: counter.and_then(|c| c.read_errors_total),
-                write_errors: counter.and_then(|c| c.write_errors_total),
-                wear_percentage: counter.and_then(|c| c.wear),
-            }
-        })
-        .collect()
-}
-
-// ─── RAM Info ───
-
-fn get_ram_info() -> RamHealthInfo {
-    let modules: Vec<PsRamModule> = run_powershell_json(
-        r#"@(Get-CimInstance Win32_PhysicalMemory -ErrorAction Stop | Select-Object Manufacturer, Speed, Capacity) | ConvertTo-Json -Depth 3"#,
-    )
-    .unwrap_or_default();
-
-    let ram_modules: Vec<RamModule> = modules
-        .into_iter()
-        .map(|m| RamModule {
-            manufacturer: m
-                .manufacturer
-                .unwrap_or_else(|| "Unknown".to_string())
-                .trim()
-                .to_string(),
-            speed_mhz: m.speed.unwrap_or(0),
-            capacity_bytes: m.capacity.unwrap_or(0),
-        })
-        .collect();
-
-    let total_capacity: u64 = ram_modules.iter().map(|m| m.capacity_bytes).sum();
-    let speed = ram_modules.first().map(|m| m.speed_mhz).unwrap_or(0);
-
-    RamHealthInfo {
-        modules: ram_modules,
-        total_capacity_bytes: total_capacity,
-        speed_mhz: speed,
-    }
 }

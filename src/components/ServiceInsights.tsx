@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { useToast } from "./ToastProvider";
 import { open } from "@tauri-apps/plugin-shell";
 import {
   Search,
@@ -22,6 +23,7 @@ export default function ServiceInsights() {
   const [favorites, setFavorites] = useState<FavoriteItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const { showToast } = useToast();
 
   // Detail panel state
   const [selectedService, setSelectedService] = useState<string | null>(null);
@@ -39,7 +41,7 @@ export default function ServiceInsights() {
       setServices(svcs);
       setFavorites(favs.filter((f) => f.item_type === "service"));
     } catch (err) {
-      console.error("Service insights fetch error:", err);
+      showToast("Failed to load services", "error");
     } finally {
       setLoading(false);
     }
@@ -66,7 +68,7 @@ export default function ServiceInsights() {
       const favs = await invoke<FavoriteItem[]>("get_favorites");
       setFavorites(favs.filter((f) => f.item_type === "service"));
     } catch (err) {
-      console.error("Favorite toggle error:", err);
+      showToast("Failed to update favorite", "error");
     }
   };
 
@@ -86,7 +88,7 @@ export default function ServiceInsights() {
       const data = await invoke<ServiceInsightResult>("get_service_insights", { serviceId: serviceName });
       setInsightData(data);
     } catch (err) {
-      console.error("Service insight error:", err);
+      showToast("Failed to load service details", "error");
     } finally {
       setInsightLoading(false);
     }
@@ -118,7 +120,7 @@ export default function ServiceInsights() {
     try {
       await open(`https://www.google.com/search?q=${query}`);
     } catch (err) {
-      console.error("Open URL error:", err);
+      showToast("Failed to open browser", "error");
     }
   };
 

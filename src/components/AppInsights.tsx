@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { useToast } from "./ToastProvider";
 import { open } from "@tauri-apps/plugin-shell";
 import {
   Search,
@@ -29,14 +30,6 @@ interface AppGroup {
 }
 
 /* ─── Helpers ─── */
-const openPath = async (path: string) => {
-  try {
-    await invoke("open_path_in_explorer", { path });
-  } catch (err) {
-    console.error("Open path error:", err);
-  }
-};
-
 function groupProcesses(processes: ProcessInfo[]): AppGroup[] {
   const map = new Map<string, AppGroup>();
   for (const p of processes) {
@@ -66,6 +59,15 @@ export default function AppInsights() {
   const [allProcesses, setAllProcesses] = useState<ProcessInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const { showToast } = useToast();
+
+  const openPath = async (path: string) => {
+    try {
+      await invoke("open_path_in_explorer", { path });
+    } catch {
+      showToast("Failed to open path in Explorer", "error");
+    }
+  };
 
   // Favorites
   const [favorites, setFavorites] = useState<FavoriteItem[]>([]);
@@ -86,7 +88,7 @@ export default function AppInsights() {
       setAllProcesses(procs.filter((p) => p.memory_mb > 0));
       setFavorites(favs.filter((f) => f.item_type === "process"));
     } catch (err) {
-      console.error("Fetch error:", err);
+      showToast("Failed to load running applications", "error");
     } finally {
       setLoading(false);
     }
@@ -121,7 +123,7 @@ export default function AppInsights() {
       const data = await invoke<AppInsightResult>("get_app_insights", { name: appName });
       setInsightData(data);
     } catch (err) {
-      console.error("App insight error:", err);
+      showToast("Failed to load app details", "error");
     } finally {
       setInsightLoading(false);
     }
@@ -137,7 +139,7 @@ export default function AppInsights() {
       const favs = await invoke<FavoriteItem[]>("get_favorites");
       setFavorites(favs.filter((f) => f.item_type === "process"));
     } catch (err) {
-      console.error("Favorite error:", err);
+      showToast("Failed to update favorite", "error");
     }
   };
 
@@ -146,7 +148,7 @@ export default function AppInsights() {
     try {
       await open(`https://www.google.com/search?q=${query}`);
     } catch (err) {
-      console.error("Open URL error:", err);
+      showToast("Failed to open browser", "error");
     }
   };
 

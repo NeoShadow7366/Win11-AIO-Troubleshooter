@@ -1,5 +1,6 @@
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { useToast } from "./ToastProvider";
 import { open } from "@tauri-apps/plugin-shell";
 import { useAdmin } from "./Layout";
 import {
@@ -8,7 +9,6 @@ import {
   Square,
   RefreshCw,
   RotateCw,
-  CheckCircle2,
   XCircle,
   X,
   ChevronRight,
@@ -24,23 +24,15 @@ import type { ServiceInfo, ServiceInsightResult, FavoriteItem } from "../types";
 
 type FilterTab = "all" | "running" | "stopped";
 
-/* ─── Toast ─── */
-interface Toast {
-  id: number;
-  type: "success" | "error";
-  message: string;
-}
-
-let toastId = 0;
 
 export default function ServicesManager() {
   const [services, setServices] = useState<ServiceInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [filter, setFilter] = useState<FilterTab>("all");
   const [actionLoading, setActionLoading] = useState<string | null>(null);
-  const [toasts, setToasts] = useState<Toast[]>([]);
-  const timerRefs = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
+  const { showToast } = useToast();
 
   /* ─── Service Insight state ─── */
   const [selectedService, setSelectedService] = useState<string | null>(null);
@@ -56,9 +48,15 @@ export default function ServicesManager() {
       const favs = await invoke<FavoriteItem[]>("get_favorites");
       setFavorites(favs.filter((f) => f.item_type === "service"));
     } catch (err) {
-      console.error("Favorites fetch error:", err);
+      showToast("Failed to load favorites", "error");
     }
   }, []);
+
+  // Debounce search input
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search), 150);
+    return () => clearTimeout(timer);
+  }, [search]);
 
   const isFavorite = (name: string) => favorites.some((f) => f.name === name);
 
@@ -76,7 +74,7 @@ export default function ServicesManager() {
       }
       await fetchFavorites();
     } catch (err) {
-      console.error("Favorite toggle error:", err);
+      showToast("Failed to update favorite", "error");
     }
   };
 
@@ -88,35 +86,16 @@ export default function ServicesManager() {
     try {
       await open(`https://www.google.com/search?q=${query}`);
     } catch (err) {
-      console.error("Open URL error:", err);
+      showToast("Failed to open browser", "error");
     }
   };
-
-  const addToast = useCallback((type: "success" | "error", message: string) => {
-    const id = ++toastId;
-    setToasts((prev) => [...prev, { id, type, message }]);
-    const timer = setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-      timerRefs.current.delete(id);
-    }, 4000);
-    timerRefs.current.set(id, timer);
-  }, []);
-
-  const removeToast = useCallback((id: number) => {
-    setToasts((prev) => prev.filter((t) => t.id !== id));
-    const timer = timerRefs.current.get(id);
-    if (timer) {
-      clearTimeout(timer);
-      timerRefs.current.delete(id);
-    }
-  }, []);
 
   const fetchServices = useCallback(async () => {
     try {
       const data = await invoke<ServiceInfo[]>("get_services");
       setServices(data);
     } catch (err) {
-      console.error("Service fetch error:", err);
+      showToast("Failed to load services", "error");
     } finally {
       setLoading(false);
     }
@@ -167,20 +146,20 @@ export default function ServicesManager() {
     try {
       const cmd = action === "start" ? "start_service" : action === "stop" ? "stop_service" : "restart_service";
       const result = await invoke<string>(cmd, { name: service.name });
-      addToast("success", result);
+      showToast(result, "success");
       await fetchServices();
       // Refresh insight if the actioned service is currently selected
       if (selectedService === service.name) {
         fetchInsight(service.name);
       }
     } catch (err) {
-      addToast("error", `Failed to ${action} ${service.display_name}: ${err}`);
+      showToast(`Failed to ${action} ${service.display_name}`, "error");
     } finally {
       setActionLoading(null);
     }
   };
 
-  const filtered = services
+  const filtered = useMemo(() => services
     .filter((s) => {
       if (filter === "running") return s.status.toLowerCase().includes("running");
       if (filter === "stopped") return s.status.toLowerCase().includes("stopped");
@@ -188,15 +167,15 @@ export default function ServicesManager() {
     })
     .filter(
       (s) =>
-        s.name.toLowerCase().includes(search.toLowerCase()) ||
-        s.display_name.toLowerCase().includes(search.toLowerCase())
-    );
+        s.name.toLowerCase().includes(debouncedSearch.toLowerCase()) ||
+        s.display_name.toLowerCase().includes(debouncedSearch.toLowerCase())
+    ), [services, filter, debouncedSearch]);
 
-  const tabs: { key: FilterTab; label: string; count: number }[] = [
+  const tabs = useMemo((): { key: FilterTab; label: string; count: number }[] => [
     { key: "all",     label: "All",     count: services.length },
     { key: "running", label: "Running", count: services.filter((s) => s.status.toLowerCase().includes("running")).length },
     { key: "stopped", label: "Stopped", count: services.filter((s) => s.status.toLowerCase().includes("stopped")).length },
-  ];
+  ], [services]);
 
   /* ─── Selected service object ─── */
   const selectedSvc = selectedService ? services.find((s) => s.name === selectedService) : null;
@@ -538,31 +517,6 @@ export default function ServicesManager() {
             </div>
           </div>
         )}
-      </div>
-
-      {/* Toast Notifications */}
-      <div className="fixed bottom-5 right-5 flex flex-col gap-2 z-[100] pointer-events-none">
-        {toasts.map((toast) => (
-          <div
-            key={toast.id}
-            className={`pointer-events-auto toast-enter flex items-center gap-3
-                       glass-panel-strong px-4 py-3 min-w-[280px] max-w-[400px]
-                       ${toast.type === "success" ? "border-success/30" : "border-danger/30"}`}
-          >
-            {toast.type === "success" ? (
-              <CheckCircle2 className="w-4 h-4 text-success shrink-0" />
-            ) : (
-              <XCircle className="w-4 h-4 text-danger shrink-0" />
-            )}
-            <span className="text-[12.5px] text-white/80 flex-1">{toast.message}</span>
-            <button
-              onClick={() => removeToast(toast.id)}
-              className="text-white/30 hover:text-white/60 transition-colors shrink-0"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        ))}
       </div>
     </div>
   );

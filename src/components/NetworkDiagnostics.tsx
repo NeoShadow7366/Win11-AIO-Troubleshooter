@@ -1,5 +1,6 @@
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { invoke, Channel } from "@tauri-apps/api/core";
+import { useToast } from "./ToastProvider";
 import {
   Globe,
   Search,
@@ -125,6 +126,7 @@ function SignalBars({ strength }: { strength: number }) {
 
 export default function NetworkDiagnostics() {
   const [activeTab, setActiveTab] = useState<Tab>("connections");
+  const { showToast } = useToast();
 
   // Connections state
   const [connections, setConnections] = useState<NetworkConnection[]>([]);
@@ -162,7 +164,7 @@ export default function NetworkDiagnostics() {
       const result = await invoke<NetworkConnection[]>("get_active_connections");
       setConnections(result);
     } catch (err) {
-      console.error("Failed to load connections:", err);
+      showToast("Failed to load network connections", "error");
     } finally {
       setConnLoading(false);
     }
@@ -175,7 +177,7 @@ export default function NetworkDiagnostics() {
       const result = await invoke<WifiInfo>("get_wifi_info");
       setWifiInfo(result);
     } catch (err) {
-      console.error("Failed to load WiFi info:", err);
+      showToast("Failed to load WiFi information", "error");
     } finally {
       setWifiLoading(false);
     }
@@ -187,68 +189,102 @@ export default function NetworkDiagnostics() {
     if (activeTab === "wifi") loadWifi();
   }, [activeTab, loadConnections, loadWifi]);
 
-  // Run ping
   const runPing = async () => {
     if (running || !host.trim()) return;
     setRunning(true);
-    setOutput((prev) => [...prev, { type: "info", text: `\n▸ Pinging ${host} (${pingCount} packets)...` }]);
+    setOutput((prev) => {
+      const next = [...prev, { type: "info" as const, text: `\n▸ Pinging ${host} (${pingCount} packets)...` }];
+      return next.length > 1000 ? next.slice(-1000) : next;
+    });
 
     try {
       const onOutput = new Channel<CliOutput>();
       onOutput.onmessage = (msg) => {
         switch (msg.type) {
           case "Stdout":
-            setOutput((prev) => [...prev, { type: "stdout", text: msg.line }]);
+            setOutput((prev) => {
+              const next = [...prev, { type: "stdout" as const, text: msg.line }];
+              return next.length > 1000 ? next.slice(-1000) : next;
+            });
             break;
           case "Stderr":
-            setOutput((prev) => [...prev, { type: "stderr", text: msg.line }]);
+            setOutput((prev) => {
+              const next = [...prev, { type: "stderr" as const, text: msg.line }];
+              return next.length > 1000 ? next.slice(-1000) : next;
+            });
             break;
           case "Complete":
-            setOutput((prev) => [...prev, { type: "info", text: `✓ Ping complete (exit code ${msg.exit_code})` }]);
+            setOutput((prev) => {
+              const next = [...prev, { type: "info" as const, text: `✓ Ping complete (exit code ${msg.exit_code})` }];
+              return next.length > 1000 ? next.slice(-1000) : next;
+            });
             setRunning(false);
             break;
           case "Error":
-            setOutput((prev) => [...prev, { type: "stderr", text: `Error: ${msg.message}` }]);
+            setOutput((prev) => {
+              const next = [...prev, { type: "stderr" as const, text: `Error: ${msg.message}` }];
+              return next.length > 1000 ? next.slice(-1000) : next;
+            });
             setRunning(false);
             break;
         }
       };
       await invoke("ping_host", { host: host.trim(), count: pingCount, onOutput });
     } catch (err) {
-      setOutput((prev) => [...prev, { type: "stderr", text: `Failed: ${err}` }]);
+      setOutput((prev) => {
+        const next = [...prev, { type: "stderr" as const, text: `Failed: ${err}` }];
+        return next.length > 1000 ? next.slice(-1000) : next;
+      });
       setRunning(false);
     }
   };
 
-  // Run traceroute
   const runTraceroute = async () => {
     if (running || !host.trim()) return;
     setRunning(true);
-    setOutput((prev) => [...prev, { type: "info", text: `\n▸ Tracing route to ${host}...` }]);
+    setOutput((prev) => {
+      const next = [...prev, { type: "info" as const, text: `\n▸ Tracing route to ${host}...` }];
+      return next.length > 1000 ? next.slice(-1000) : next;
+    });
 
     try {
       const onOutput = new Channel<CliOutput>();
       onOutput.onmessage = (msg) => {
         switch (msg.type) {
           case "Stdout":
-            setOutput((prev) => [...prev, { type: "stdout", text: msg.line }]);
+            setOutput((prev) => {
+              const next = [...prev, { type: "stdout" as const, text: msg.line }];
+              return next.length > 1000 ? next.slice(-1000) : next;
+            });
             break;
           case "Stderr":
-            setOutput((prev) => [...prev, { type: "stderr", text: msg.line }]);
+            setOutput((prev) => {
+              const next = [...prev, { type: "stderr" as const, text: msg.line }];
+              return next.length > 1000 ? next.slice(-1000) : next;
+            });
             break;
           case "Complete":
-            setOutput((prev) => [...prev, { type: "info", text: `✓ Traceroute complete (exit code ${msg.exit_code})` }]);
+            setOutput((prev) => {
+              const next = [...prev, { type: "info" as const, text: `✓ Traceroute complete (exit code ${msg.exit_code})` }];
+              return next.length > 1000 ? next.slice(-1000) : next;
+            });
             setRunning(false);
             break;
           case "Error":
-            setOutput((prev) => [...prev, { type: "stderr", text: `Error: ${msg.message}` }]);
+            setOutput((prev) => {
+              const next = [...prev, { type: "stderr" as const, text: `Error: ${msg.message}` }];
+              return next.length > 1000 ? next.slice(-1000) : next;
+            });
             setRunning(false);
             break;
         }
       };
       await invoke("traceroute_host", { host: host.trim(), onOutput });
     } catch (err) {
-      setOutput((prev) => [...prev, { type: "stderr", text: `Failed: ${err}` }]);
+      setOutput((prev) => {
+        const next = [...prev, { type: "stderr" as const, text: `Failed: ${err}` }];
+        return next.length > 1000 ? next.slice(-1000) : next;
+      });
       setRunning(false);
     }
   };
@@ -261,7 +297,7 @@ export default function NetworkDiagnostics() {
       const result = await invoke<DnsLookupResult>("dns_lookup", { domain: dnsDomain.trim() });
       setDnsResult(result);
     } catch (err) {
-      console.error("DNS lookup failed:", err);
+      showToast("DNS lookup failed", "error");
       setDnsResult({ records: [], query: dnsDomain });
     } finally {
       setDnsLoading(false);
@@ -281,7 +317,7 @@ export default function NetworkDiagnostics() {
   const clearTerminal = () => setOutput([]);
 
   // Filtered connections
-  const filteredConns = connections.filter((c) => {
+  const filteredConns = useMemo(() => connections.filter((c) => {
     if (!connSearch) return true;
     const term = connSearch.toLowerCase();
     return (
@@ -290,7 +326,7 @@ export default function NetworkDiagnostics() {
       c.local_address.includes(term) ||
       c.state.toLowerCase().includes(term)
     );
-  });
+  }), [connections, connSearch]);
 
   return (
     <div className="flex flex-col gap-4 h-full animate-fade-in">
@@ -693,7 +729,7 @@ function TerminalPanel({
         </div>
       </div>
 
-      <div ref={terminalRef as React.RefObject<HTMLDivElement>} className="flex-1 overflow-y-auto p-4 bg-[#07070f]">
+      <div ref={terminalRef as React.RefObject<HTMLDivElement>} className="flex-1 overflow-y-auto p-4 bg-[var(--color-terminal-bg)]">
         {output.length === 0 ? (
           <div className="flex items-center justify-center h-full">
             <span className="text-[12px] text-white/15 font-mono">

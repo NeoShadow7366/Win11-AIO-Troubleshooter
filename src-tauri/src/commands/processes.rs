@@ -1,5 +1,7 @@
 use serde::Serialize;
+use std::sync::{Arc, Mutex};
 use sysinfo::{Pid, System};
+use tauri::State;
 
 use crate::utils::powershell::run_powershell;
 
@@ -34,15 +36,16 @@ pub struct ProcessDetails {
 }
 
 /// Returns a list of all running processes with memory > 0.
-/// Two CPU refreshes are done with a delay to get accurate CPU usage readings.
+/// Uses shared System state — the natural 2-second polling interval from the
+/// frontend provides the CPU usage delta, so no sleep is needed.
 #[tauri::command]
-pub async fn get_processes() -> Result<Vec<ProcessInfo>, String> {
-    tokio::task::spawn_blocking(|| {
-        let mut sys = System::new();
+pub async fn get_processes(
+    sys_state: State<'_, Arc<Mutex<System>>>,
+) -> Result<Vec<ProcessInfo>, String> {
+    let sys_arc = Arc::clone(&sys_state);
 
-        // Refresh twice with delay for accurate CPU readings
-        sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
-        std::thread::sleep(std::time::Duration::from_millis(200));
+    tokio::task::spawn_blocking(move || {
+        let mut sys = sys_arc.lock().unwrap_or_else(|e| e.into_inner());
         sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
 
         let mut processes: Vec<ProcessInfo> = sys
@@ -86,51 +89,69 @@ pub async fn get_processes() -> Result<Vec<ProcessInfo>, String> {
 
 /// Get detailed information about a specific process by PID.
 #[tauri::command]
-pub async fn get_process_details(pid: u32) -> Result<ProcessDetails, String> {
+pub async fn get_process_details(
+    pid: u32,
+    sys_state: State<'_, Arc<Mutex<System>>>,
+) -> Result<ProcessDetails, String> {
+    let sys_arc = Arc::clone(&sys_state);
+
     tokio::task::spawn_blocking(move || {
-        let mut sys = System::new();
-        sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
-        std::thread::sleep(std::time::Duration::from_millis(200));
-        sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+        // Lock, refresh, extract what we need, then drop the lock before the PowerShell call
+        let (name, cpu_usage, memory_mb, status_str, path, command_line, parent_pid, thread_count, start_time) = {
+            let mut sys = sys_arc.lock().unwrap_or_else(|e| e.into_inner());
+            sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
 
-        let process = sys
-            .process(Pid::from_u32(pid))
-            .ok_or_else(|| format!("Process with PID {} not found", pid))?;
+            let process = sys
+                .process(Pid::from_u32(pid))
+                .ok_or_else(|| format!("Process with PID {} not found", pid))?;
 
-        let name = process.name().to_string_lossy().to_string();
-        let path = process.exe().map(|e| e.to_string_lossy().to_string());
-        let parent_pid = process.parent().map(|p| p.as_u32());
+            let name = process.name().to_string_lossy().to_string();
+            let path = process.exe().map(|e| e.to_string_lossy().to_string());
+            let parent_pid = process.parent().map(|p| p.as_u32());
 
-        let status_str = match process.status() {
-            sysinfo::ProcessStatus::Run => "Running",
-            sysinfo::ProcessStatus::Sleep => "Sleeping",
-            sysinfo::ProcessStatus::Stop => "Stopped",
-            sysinfo::ProcessStatus::Zombie => "Zombie",
-            _ => "Unknown",
-        };
+            let status_str = match process.status() {
+                sysinfo::ProcessStatus::Run => "Running",
+                sysinfo::ProcessStatus::Sleep => "Sleeping",
+                sysinfo::ProcessStatus::Stop => "Stopped",
+                sysinfo::ProcessStatus::Zombie => "Zombie",
+                _ => "Unknown",
+            };
 
-        let cmd_line = process.cmd().iter()
-            .map(|s| s.to_string_lossy().to_string())
-            .collect::<Vec<String>>()
-            .join(" ");
-        let command_line = if cmd_line.is_empty() { None } else { Some(cmd_line) };
+            let cmd_line = process.cmd().iter()
+                .map(|s| s.to_string_lossy().to_string())
+                .collect::<Vec<String>>()
+                .join(" ");
+            let command_line = if cmd_line.is_empty() { None } else { Some(cmd_line) };
 
-        let thread_count = Some(process.tasks().map(|t| t.len() as u32).unwrap_or(0));
+            let thread_count = Some(process.tasks().map(|t| t.len() as u32).unwrap_or(0));
 
-        let start_time = {
-            let ts = process.start_time();
-            if ts > 0 {
-                let dt = chrono::DateTime::from_timestamp(ts as i64, 0);
-                dt.map(|d| {
-                    let local: chrono::DateTime<chrono::Local> = d.into();
-                    local.format("%Y-%m-%d %H:%M:%S").to_string()
-                })
-            } else {
-                None
-            }
-        };
+            let start_time = {
+                let ts = process.start_time();
+                if ts > 0 {
+                    let dt = chrono::DateTime::from_timestamp(ts as i64, 0);
+                    dt.map(|d| {
+                        let local: chrono::DateTime<chrono::Local> = d.into();
+                        local.format("%Y-%m-%d %H:%M:%S").to_string()
+                    })
+                } else {
+                    None
+                }
+            };
 
-        // Get description, company, and priority via PowerShell
+            Ok::<_, String>((
+                name,
+                process.cpu_usage(),
+                process.memory() as f64 / (1024.0 * 1024.0),
+                status_str.to_string(),
+                path,
+                command_line,
+                parent_pid,
+                thread_count,
+                start_time,
+            ))
+        }?;
+
+        // Get description, company, and priority via PowerShell (lock is dropped)
         let (description, company, priority) = if let Some(ref exe_path) = path {
             let sanitized = exe_path.replace('\'', "''");
             let script = format!(
@@ -159,9 +180,9 @@ $pri = if ($proc) {{ $proc.PriorityClass }} else {{ '' }}
         Ok(ProcessDetails {
             pid,
             name,
-            cpu_usage: process.cpu_usage(),
-            memory_mb: process.memory() as f64 / (1024.0 * 1024.0),
-            status: status_str.to_string(),
+            cpu_usage,
+            memory_mb,
+            status: status_str,
             path,
             command_line,
             user: None,
@@ -217,9 +238,15 @@ pub async fn get_process_icon(exe_path: String) -> Result<Option<String>, String
 
 /// Kills a process by PID. Returns success message or error.
 #[tauri::command]
-pub async fn kill_process(pid: u32) -> Result<String, String> {
+pub async fn kill_process(
+    pid: u32,
+    sys_state: State<'_, Arc<Mutex<System>>>,
+) -> Result<String, String> {
+    let sys_arc = Arc::clone(&sys_state);
+
     tokio::task::spawn_blocking(move || {
-        let sys = System::new_all();
+        let mut sys = sys_arc.lock().unwrap_or_else(|e| e.into_inner());
+        sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
 
         let process = sys
             .process(Pid::from_u32(pid))
