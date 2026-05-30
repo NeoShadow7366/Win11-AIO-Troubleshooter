@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import {
   RefreshCw,
   Monitor,
@@ -8,6 +9,8 @@ import {
   Info,
   ExternalLink,
   Heart,
+  Bell,
+  MonitorCog,
 } from "lucide-react";
 import { useTheme } from "./Layout";
 import { useToast } from "./ToastProvider";
@@ -19,6 +22,10 @@ interface AppSettings {
   defaultPingCount: number;
   defaultTracerouteHops: number;
   processAutoRefresh: boolean;
+  closeToTray: boolean;
+  alertCpuThreshold: number;
+  alertRamThreshold: number;
+  alertsEnabled: boolean;
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -27,6 +34,10 @@ const DEFAULT_SETTINGS: AppSettings = {
   defaultPingCount: 4,
   defaultTracerouteHops: 30,
   processAutoRefresh: false,
+  closeToTray: false,
+  alertCpuThreshold: 90,
+  alertRamThreshold: 90,
+  alertsEnabled: false,
 };
 
 const STORAGE_KEY = "aio-settings";
@@ -62,7 +73,38 @@ export default function SettingsPage() {
     showToast("Settings reset to defaults", "success");
   };
 
-  const appVersion = "2.1.0";
+  const appVersion = "2.2.0";
+
+  // Sync close-to-tray with Rust backend
+  useEffect(() => {
+    invoke("set_close_to_tray", { enabled: settings.closeToTray }).catch(() => {});
+  }, [settings.closeToTray]);
+
+  // Notification alerts — check CPU/RAM every 10s
+  const alertCooldownRef = useRef<number>(0);
+  useEffect(() => {
+    if (!settings.alertsEnabled) return;
+    const interval = setInterval(async () => {
+      try {
+        const stats = await invoke<{ cpu_usage: number; ram_used: number; ram_total: number }>("get_system_stats");
+        const ramPct = stats.ram_total > 0 ? (stats.ram_used / stats.ram_total) * 100 : 0;
+        const now = Date.now();
+        if (now - alertCooldownRef.current < 60000) return; // 1 min cooldown
+        const alerts: string[] = [];
+        if (stats.cpu_usage > settings.alertCpuThreshold) alerts.push(`CPU at ${stats.cpu_usage.toFixed(0)}%`);
+        if (ramPct > settings.alertRamThreshold) alerts.push(`RAM at ${ramPct.toFixed(0)}%`);
+        if (alerts.length > 0 && "Notification" in window) {
+          if (Notification.permission === "granted") {
+            new Notification("AIO Troubleshooter Alert", { body: alerts.join(" • "), icon: "/icon.png" });
+            alertCooldownRef.current = now;
+          } else if (Notification.permission !== "denied") {
+            Notification.requestPermission();
+          }
+        }
+      } catch {}
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [settings.alertsEnabled, settings.alertCpuThreshold, settings.alertRamThreshold]);
 
   return (
     <div className="flex flex-col gap-6 h-full animate-fade-in overflow-y-auto pb-8">
@@ -157,6 +199,69 @@ export default function SettingsPage() {
           <ToggleSwitch
             checked={settings.processAutoRefresh}
             onChange={(v) => update("processAutoRefresh", v)}
+          />
+        </SettingsRow>
+      </SettingsSection>
+
+      {/* System Tray */}
+      <SettingsSection title="System Tray" icon={<MonitorCog className="w-4 h-4" />}>
+        <SettingsRow
+          label="Minimize to Tray on Close"
+          description="Keep running in system tray when you close the window"
+        >
+          <ToggleSwitch
+            checked={settings.closeToTray}
+            onChange={(v) => update("closeToTray", v)}
+          />
+        </SettingsRow>
+      </SettingsSection>
+
+      {/* Notification Alerts */}
+      <SettingsSection title="Notification Alerts" icon={<Bell className="w-4 h-4" />}>
+        <SettingsRow
+          label="Enable Alerts"
+          description="Show desktop notifications when resources exceed thresholds"
+        >
+          <ToggleSwitch
+            checked={settings.alertsEnabled}
+            onChange={(v) => {
+              update("alertsEnabled", v);
+              if (v && "Notification" in window && Notification.permission === "default") {
+                Notification.requestPermission();
+              }
+            }}
+          />
+        </SettingsRow>
+
+        <SettingsRow
+          label="CPU Alert Threshold"
+          description="Alert when CPU usage exceeds this percentage"
+        >
+          <IntervalSelect
+            value={settings.alertCpuThreshold}
+            onChange={(v) => update("alertCpuThreshold", v)}
+            options={[
+              { value: 70, label: "70%" },
+              { value: 80, label: "80%" },
+              { value: 90, label: "90%" },
+              { value: 95, label: "95%" },
+            ]}
+          />
+        </SettingsRow>
+
+        <SettingsRow
+          label="RAM Alert Threshold"
+          description="Alert when RAM usage exceeds this percentage"
+        >
+          <IntervalSelect
+            value={settings.alertRamThreshold}
+            onChange={(v) => update("alertRamThreshold", v)}
+            options={[
+              { value: 70, label: "70%" },
+              { value: 80, label: "80%" },
+              { value: 90, label: "90%" },
+              { value: 95, label: "95%" },
+            ]}
           />
         </SettingsRow>
       </SettingsSection>

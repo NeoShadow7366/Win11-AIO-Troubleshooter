@@ -23,6 +23,8 @@ import {
   PieChart,
   ShieldCheck,
   CloudDownload,
+  Users,
+  BarChart3,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import FeatureGuide from "./FeatureGuide";
@@ -61,6 +63,7 @@ const NAV_SECTIONS: NavSection[] = [
       { id: "drivers",     label: "Driver Manager",    icon: <CircuitBoard className="w-[18px] h-[18px]" /> },
       { id: "diskanalyzer", label: "Disk Analyzer",     icon: <PieChart className="w-[18px] h-[18px]" /> },
       { id: "firewall",     label: "Firewall Rules",    icon: <ShieldCheck className="w-[18px] h-[18px]" /> },
+      { id: "users",        label: "Users",             icon: <Users className="w-[18px] h-[18px]" /> },
     ],
   },
   {
@@ -81,6 +84,7 @@ const NAV_SECTIONS: NavSection[] = [
       { id: "appinsights",      label: "App Insights",     icon: <Search className="w-[18px] h-[18px]" /> },
       { id: "serviceinsights",  label: "Service Insights", icon: <Zap className="w-[18px] h-[18px]" /> },
       { id: "bsod",             label: "BSOD Analyzer",    icon: <Skull className="w-[18px] h-[18px]" /> },
+      { id: "apphistory",        label: "App History",       icon: <BarChart3 className="w-[18px] h-[18px]" /> },
     ],
   },
 ];
@@ -194,7 +198,7 @@ export default function Sidebar({ activePage, onNavigate }: SidebarProps) {
 
         {/* Footer */}
         <div className={`flex items-center ${collapsed ? "flex-col gap-2" : "justify-between"} px-3 pt-3 border-t border-white/[0.04]`}>
-          {!collapsed && <span className="text-[11px] text-white/20 font-mono tracking-wider">v2.1.0</span>}
+          {!collapsed && <span className="text-[11px] text-white/20 font-mono tracking-wider">v2.2.0</span>}
           <div className={`flex items-center ${collapsed ? "flex-col" : ""} gap-1`}>
             <button
               id="settings-btn"

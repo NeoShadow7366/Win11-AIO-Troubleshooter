@@ -1,5 +1,5 @@
 const GITHUB_REPO = "NeoShadow7366/Win11-AIO-Troubleshooter";
-const CURRENT_VERSION = "2.1.0";
+const CURRENT_VERSION = "2.2.0";
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const STORAGE_KEY = "aio-update-last-check";
 

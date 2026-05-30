@@ -21,6 +21,20 @@ export interface SystemStats {
   external_ip: string;
   net_rx_bytes: number;
   net_tx_bytes: number;
+  gpu_usage: number | null;
+  gpu_memory_used: number | null;
+  gpu_memory_total: number | null;
+  cpu_speed_mhz: number | null;
+  disk_read_bytes: number;
+  disk_write_bytes: number;
+  ram_available: number;
+  swap_used: number;
+  swap_total: number;
+  ram_cached: number | null;
+  ram_committed: number | null;
+  ram_commit_limit: number | null;
+  ram_paged_pool: number | null;
+  ram_non_paged_pool: number | null;
 }
 
 export interface SystemSpecs {
@@ -42,6 +56,9 @@ export interface ProcessInfo {
   path: string | null;
   disk_read_bytes: number;
   disk_write_bytes: number;
+  parent_pid: number | null;
+  net_bytes_sent: number;
+  net_bytes_recv: number;
 }
 
 export interface ProcessDetails {
@@ -59,6 +76,49 @@ export interface ProcessDetails {
   description: string | null;
   company: string | null;
   priority: string | null;
+}
+
+export interface ProcessDll {
+  name: string;
+  path: string;
+  size_bytes: number;
+}
+
+export interface AppHistoryEntry {
+  name: string;
+  cpu_time_secs: number;
+  memory_peak_mb: number;
+  memory_current_mb: number;
+  disk_read_bytes: number;
+  disk_write_bytes: number;
+  instance_count: number;
+  net_bytes_sent: number;
+  net_bytes_recv: number;
+}
+
+export interface ProcessConnection {
+  local_addr: string;
+  remote_addr: string;
+  state: string;
+  protocol: string;
+}
+
+export interface AffinityInfo {
+  process_mask: number;
+  system_mask: number;
+  core_count: number;
+}
+
+// ─── Users ───
+
+export interface UserSession {
+  username: string;
+  session_id: number;
+  status: string;
+  logon_time: string | null;
+  cpu_total: number;
+  memory_mb: number;
+  process_count: number;
 }
 
 // ─── Services ───

@@ -5,7 +5,7 @@ import { usePageVisible } from "./Layout";
 import {
   Monitor, Cpu, HardDrive, Server, Clock, Globe, Wifi, Copy, Check,
   Heart, Shield, AlertTriangle, RefreshCw, MemoryStick, Rocket, ChevronRight,
-  ChevronDown, ChevronUp,
+  ChevronDown, ChevronUp, Maximize2, X,
 } from "lucide-react";
 import type { SystemStats, SystemSpecs, DiskInfo } from "../types";
 
@@ -41,13 +41,14 @@ function getIcon(name: string) {
 }
 
 /* ─── Sparkline Component ─── */
-function Sparkline({ data, color, max, label, unit, formatValue }: {
+function Sparkline({ data, color, max, label, unit, formatValue, onExpand }: {
   data: number[];
   color: string;
   max: number;
   label: string;
   unit: string;
   formatValue?: (v: number) => string;
+  onExpand?: () => void;
 }) {
   const width = 280;
   const height = 48;
@@ -66,22 +67,23 @@ function Sparkline({ data, color, max, label, unit, formatValue }: {
     : "";
 
   return (
-    <div className="glass-panel p-3 hover:bg-white/[0.05] transition-all duration-300 group">
+    <div
+      className="glass-panel p-3 hover:bg-white/[0.05] transition-all duration-300 group cursor-pointer"
+      onClick={onExpand}
+    >
       <div className="flex items-center justify-between mb-1.5">
-        <span className="text-[11px] text-white/40 font-medium">{label}</span>
+        <span className="text-[11px] text-white/40 font-medium flex items-center gap-1.5">
+          {label}
+          {onExpand && <Maximize2 className="w-3 h-3 text-white/15 group-hover:text-white/40 transition-colors" />}
+        </span>
         <span className="text-[13px] font-bold tabular-nums" style={{ color }}>
           {displayValue}
         </span>
       </div>
       <svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
-        {/* Fill area */}
         {fillPoints && (
-          <polygon
-            points={fillPoints}
-            fill={`${color}15`}
-          />
+          <polygon points={fillPoints} fill={`${color}15`} />
         )}
-        {/* Line */}
         {data.length > 1 && (
           <polyline
             points={points}
@@ -94,6 +96,86 @@ function Sparkline({ data, color, max, label, unit, formatValue }: {
           />
         )}
       </svg>
+    </div>
+  );
+}
+
+/* ─── Expanded Sparkline Modal ─── */
+function ExpandedSparkline({ data, color, max, label, unit, formatValue, onClose }: {
+  data: number[];
+  color: string;
+  max: number;
+  label: string;
+  unit: string;
+  formatValue?: (v: number) => string;
+  onClose: () => void;
+}) {
+  const width = 800;
+  const height = 200;
+  const effectiveMax = max > 0 ? max : 100;
+  const latest = data.length > 0 ? data[data.length - 1] : 0;
+  const avg = data.length > 0 ? data.reduce((a, b) => a + b, 0) / data.length : 0;
+  const peak = data.length > 0 ? Math.max(...data) : 0;
+  const displayValue = formatValue ? formatValue(latest) : `${latest.toFixed(1)}${unit}`;
+  const displayAvg = formatValue ? formatValue(avg) : `${avg.toFixed(1)}${unit}`;
+  const displayPeak = formatValue ? formatValue(peak) : `${peak.toFixed(1)}${unit}`;
+
+  const points = data.map((v, i) => {
+    const x = (i / Math.max(data.length - 1, 1)) * width;
+    const y = height - (Math.min(v / effectiveMax, 1) * (height - 8)) - 4;
+    return `${x},${y}`;
+  }).join(" ");
+
+  const fillPoints = data.length > 0
+    ? `0,${height} ${points} ${width},${height}`
+    : "";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-fade-in"
+         onClick={onClose}>
+      <div className="glass-panel-strong w-[880px] p-6 animate-slide-up" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <span className="text-[15px] font-semibold text-white/85">{label}</span>
+            <span className="text-[18px] font-bold tabular-nums" style={{ color }}>{displayValue}</span>
+          </div>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-4 text-[11px] text-white/40">
+              <span>Avg: <span className="font-bold text-white/60">{displayAvg}</span></span>
+              <span>Peak: <span className="font-bold text-white/60">{displayPeak}</span></span>
+              <span>Points: <span className="font-bold text-white/60">{data.length}</span></span>
+            </div>
+            <button onClick={onClose}
+                    className="flex items-center justify-center w-7 h-7 rounded-lg text-white/30 hover:text-white/70 hover:bg-white/[0.06] transition-all">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+        <svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none"
+             className="rounded-lg overflow-hidden bg-white/[0.02]">
+          {/* Grid lines */}
+          {[0.25, 0.5, 0.75].map((pct) => (
+            <line key={pct} x1="0" y1={height * (1 - pct)} x2={width} y2={height * (1 - pct)}
+                  stroke="rgba(255,255,255,0.04)" strokeDasharray="4" />
+          ))}
+          {fillPoints && (
+            <polygon points={fillPoints} fill={`${color}12`} />
+          )}
+          {data.length > 1 && (
+            <polyline
+              points={points} fill="none" stroke={color} strokeWidth="2"
+              strokeLinejoin="round" strokeLinecap="round"
+              style={{ filter: `drop-shadow(0 0 6px ${color}50)` }}
+            />
+          )}
+          {/* Average line */}
+          {data.length > 1 && (
+            <line x1="0" y1={height - (Math.min(avg / effectiveMax, 1) * (height - 8)) - 4}
+                  x2={width} y2={height - (Math.min(avg / effectiveMax, 1) * (height - 8)) - 4}
+                  stroke={color} strokeWidth="1" strokeDasharray="6 4" opacity="0.3" />
+          )}
+        </svg>
+      </div>
     </div>
   );
 }
@@ -204,7 +286,7 @@ interface GaugeProps {
   icon: React.ReactNode;
 }
 
-function CircularGauge({ value, max, label, unit = "%", icon }: GaugeProps) {
+function CircularGauge({ value, max, label, unit = "%", icon, subLabel }: GaugeProps & { subLabel?: string }) {
   const pct = max > 0 ? Math.min((value / max) * 100, 100) : 0;
   const radius = 52;
   const circumference = 2 * Math.PI * radius;
@@ -258,11 +340,16 @@ function CircularGauge({ value, max, label, unit = "%", icon }: GaugeProps) {
         </div>
       </div>
 
-      <div className="flex items-center gap-2">
-        <span className="text-white/40 group-hover:text-white/60 transition-colors">{icon}</span>
-        <span className="text-[13px] font-medium text-white/70 group-hover:text-white/90 transition-colors">
-          {label}
-        </span>
+      <div className="flex flex-col items-center gap-0.5">
+        <div className="flex items-center gap-2">
+          <span className="text-white/40 group-hover:text-white/60 transition-colors">{icon}</span>
+          <span className="text-[13px] font-medium text-white/70 group-hover:text-white/90 transition-colors">
+            {label}
+          </span>
+        </div>
+        {subLabel && (
+          <span className="text-[10px] text-white/25 font-mono tabular-nums">{subLabel}</span>
+        )}
       </div>
 
       {/* Usage detail */}
@@ -452,6 +539,14 @@ function formatNetSpeed(kbps: number): string {
   return `${kbps.toFixed(0)} KB/s`;
 }
 
+/* ─── Helper: format disk I/O speed ─── */
+function formatDiskSpeed(bytesPerSec: number): string {
+  if (bytesPerSec >= 1024 * 1024 * 1024) return `${(bytesPerSec / (1024 * 1024 * 1024)).toFixed(1)} GB/s`;
+  if (bytesPerSec >= 1024 * 1024) return `${(bytesPerSec / (1024 * 1024)).toFixed(1)} MB/s`;
+  if (bytesPerSec >= 1024) return `${(bytesPerSec / 1024).toFixed(0)} KB/s`;
+  return `${bytesPerSec.toFixed(0)} B/s`;
+}
+
 /* ─── Dashboard ─── */
 export default function Dashboard() {
   const [stats, setStats] = useState<SystemStats | null>(null);
@@ -463,17 +558,35 @@ export default function Dashboard() {
   const errorShownRef = useRef(false);
   const isVisible = usePageVisible('dashboard');
 
-  // Performance history (60-second rolling window)
-  const MAX_POINTS = 30;
+  // Performance history (120-second rolling window — extended)
+  const MAX_POINTS = 60;
   const [cpuHistory, setCpuHistory] = useState<number[]>([]);
   const [ramHistory, setRamHistory] = useState<number[]>([]);
   const [netDownHistory, setNetDownHistory] = useState<number[]>([]);
   const [netUpHistory, setNetUpHistory] = useState<number[]>([]);
   const prevNetRef = useRef<{ rx: number; tx: number; time: number } | null>(null);
 
+  // GPU history
+  const [gpuHistory, setGpuHistory] = useState<number[]>([]);
+  const [gpuMemUsed, setGpuMemUsed] = useState<number | null>(null);
+  const [gpuMemTotal, setGpuMemTotal] = useState<number | null>(null);
+
+  // Disk I/O history
+  const [diskReadHistory, setDiskReadHistory] = useState<number[]>([]);
+  const [diskWriteHistory, setDiskWriteHistory] = useState<number[]>([]);
+
+  // CPU speed
+  const [cpuSpeedMhz, setCpuSpeedMhz] = useState<number | null>(null);
+
   // Per-core CPU
   const [perCoreUsage, setPerCoreUsage] = useState<number[]>([]);
   const [showPerCore, setShowPerCore] = useState(false);
+
+  // Expanded sparkline view
+  const [expandedGraph, setExpandedGraph] = useState<{
+    data: number[]; color: string; max: number; label: string; unit: string;
+    formatValue?: (v: number) => string;
+  } | null>(null);
 
   // Fetch only stats (called every 2s)
   const fetchStats = useCallback(async () => {
@@ -503,6 +616,20 @@ export default function Dashboard() {
 
       // Per-core CPU
       if (s.per_core_usage) setPerCoreUsage(s.per_core_usage);
+
+      // GPU
+      if (s.gpu_usage != null) {
+        setGpuHistory((prev) => [...prev.slice(-(MAX_POINTS - 1)), s.gpu_usage!]);
+      }
+      if (s.gpu_memory_used != null) setGpuMemUsed(s.gpu_memory_used);
+      if (s.gpu_memory_total != null) setGpuMemTotal(s.gpu_memory_total);
+
+      // Disk I/O
+      setDiskReadHistory((prev) => [...prev.slice(-(MAX_POINTS - 1)), s.disk_read_bytes || 0]);
+      setDiskWriteHistory((prev) => [...prev.slice(-(MAX_POINTS - 1)), s.disk_write_bytes || 0]);
+
+      // CPU speed
+      if (s.cpu_speed_mhz != null) setCpuSpeedMhz(s.cpu_speed_mhz);
     } catch (err) {
       if (!errorShownRef.current) {
         showToast("Failed to fetch system stats", "error");
@@ -552,7 +679,7 @@ export default function Dashboard() {
         <h2 className="text-[11px] font-semibold text-white/30 uppercase tracking-[0.12em] mb-3 px-1">
           System Resources
         </h2>
-        <div className="grid grid-cols-3 gap-4">
+        <div className={`grid gap-4 ${stats?.gpu_usage != null ? 'grid-cols-4' : 'grid-cols-3'}`}>
           {loading || !stats ? (
             <>
               <SkeletonGauge />
@@ -566,6 +693,7 @@ export default function Dashboard() {
                 max={100}
                 label="CPU"
                 icon={<Cpu className="w-4 h-4" />}
+                subLabel={cpuSpeedMhz ? `${(cpuSpeedMhz / 1000).toFixed(2)} GHz` : undefined}
               />
               <CircularGauge
                 value={bytesToGB(stats.ram_used)}
@@ -579,10 +707,106 @@ export default function Dashboard() {
                 label="Total Disk"
                 icon={<HardDrive className="w-4 h-4" />}
               />
+              {stats.gpu_usage != null && (
+                <CircularGauge
+                  value={stats.gpu_usage}
+                  max={100}
+                  label="GPU"
+                  icon={<Monitor className="w-4 h-4" />}
+                  subLabel={gpuMemUsed != null && gpuMemTotal != null
+                    ? `${gpuMemUsed} / ${gpuMemTotal} MB`
+                    : undefined
+                  }
+                />
+              )}
             </>
           )}
       </div>
       </section>
+
+      {/* Memory Composition */}
+      {stats && stats.ram_cached != null && (
+        <section>
+          <h2 className="text-[11px] font-semibold text-white/30 uppercase tracking-[0.12em] mb-3 px-1">
+            Memory Composition
+          </h2>
+          <div className="glass-panel p-4">
+            {(() => {
+              const totalBytes = stats.ram_total;
+              const usedBytes = stats.ram_used;
+              const cachedBytes = stats.ram_cached || 0;
+              const pagedPool = stats.ram_paged_pool || 0;
+              const availableBytes = stats.ram_available;
+              const otherUsed = Math.max(0, usedBytes - cachedBytes - pagedPool);
+
+              const toGB = (b: number) => (b / (1024 * 1024 * 1024)).toFixed(1);
+              const pct = (b: number) => totalBytes > 0 ? ((b / totalBytes) * 100) : 0;
+
+              const segments = [
+                { label: "In Use", bytes: otherUsed, color: "#60CDFF" },
+                { label: "Cached", bytes: cachedBytes, color: "#2ed573" },
+                { label: "Paged Pool", bytes: pagedPool, color: "#a855f7" },
+                { label: "Available", bytes: availableBytes, color: "rgba(255,255,255,0.08)" },
+              ];
+
+              return (
+                <>
+                  {/* Stacked bar */}
+                  <div className="flex w-full h-5 rounded-full overflow-hidden bg-white/[0.03] mb-3">
+                    {segments.map((seg) => (
+                      seg.bytes > 0 && (
+                        <div
+                          key={seg.label}
+                          className="h-full transition-all duration-700 first:rounded-l-full last:rounded-r-full"
+                          style={{
+                            width: `${pct(seg.bytes)}%`,
+                            backgroundColor: seg.color,
+                            opacity: seg.label === "Available" ? 1 : 0.8,
+                          }}
+                          title={`${seg.label}: ${toGB(seg.bytes)} GB (${pct(seg.bytes).toFixed(0)}%)`}
+                        />
+                      )
+                    ))}
+                  </div>
+
+                  {/* Legend */}
+                  <div className="flex items-center gap-5 flex-wrap">
+                    {segments.filter(s => s.bytes > 0).map((seg) => (
+                      <div key={seg.label} className="flex items-center gap-1.5">
+                        <div className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: seg.color, opacity: seg.label === "Available" ? 0.3 : 0.8 }} />
+                        <span className="text-[11px] text-white/40">{seg.label}</span>
+                        <span className="text-[11px] text-white/60 font-mono tabular-nums">{toGB(seg.bytes)} GB</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Secondary stats */}
+                  <div className="flex items-center gap-6 mt-3 pt-3 border-t border-white/[0.04]">
+                    {stats.ram_committed != null && stats.ram_commit_limit != null && (
+                      <div className="flex items-center gap-1.5 text-[11px] text-white/35">
+                        <span>Committed:</span>
+                        <span className="text-white/55 font-mono tabular-nums">{toGB(stats.ram_committed)} / {toGB(stats.ram_commit_limit)} GB</span>
+                      </div>
+                    )}
+                    {stats.swap_total > 0 && (
+                      <div className="flex items-center gap-1.5 text-[11px] text-white/35">
+                        <span>Swap:</span>
+                        <span className="text-white/55 font-mono tabular-nums">{toGB(stats.swap_used)} / {toGB(stats.swap_total)} GB</span>
+                      </div>
+                    )}
+                    {stats.ram_non_paged_pool != null && (
+                      <div className="flex items-center gap-1.5 text-[11px] text-white/35">
+                        <span>Non-Paged Pool:</span>
+                        <span className="text-white/55 font-mono tabular-nums">{toGB(stats.ram_non_paged_pool)} GB</span>
+                      </div>
+                    )}
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+        </section>
+      )}
 
       {/* Performance Sparklines */}
       {cpuHistory.length > 2 && (
@@ -591,26 +815,44 @@ export default function Dashboard() {
             Performance History
           </h2>
           <div className="grid grid-cols-2 gap-3">
-            <Sparkline data={cpuHistory} color="#60CDFF" max={100} label="CPU Usage" unit="%" />
-            <Sparkline data={ramHistory} color="#2ed573" max={100} label="Memory Usage" unit="%" />
+            <Sparkline data={cpuHistory} color="#60CDFF" max={100} label="CPU Usage" unit="%"
+              onExpand={() => setExpandedGraph({ data: cpuHistory, color: "#60CDFF", max: 100, label: "CPU Usage", unit: "%" })} />
+            <Sparkline data={ramHistory} color="#2ed573" max={100} label="Memory Usage" unit="%"
+              onExpand={() => setExpandedGraph({ data: ramHistory, color: "#2ed573", max: 100, label: "Memory Usage", unit: "%" })} />
+            {gpuHistory.length > 2 && (
+              <Sparkline data={gpuHistory} color="#a855f7" max={100} label="GPU Usage" unit="%"
+                onExpand={() => setExpandedGraph({ data: gpuHistory, color: "#a855f7", max: 100, label: "GPU Usage", unit: "%" })} />
+            )}
             {netDownHistory.length > 2 && (
               <Sparkline
-                data={netDownHistory}
-                color="#2ed573"
+                data={netDownHistory} color="#2ed573"
                 max={Math.max(...netDownHistory, 100)}
-                label="↓ Download"
-                unit=" KB/s"
-                formatValue={formatNetSpeed}
+                label="↓ Download" unit=" KB/s" formatValue={formatNetSpeed}
+                onExpand={() => setExpandedGraph({ data: netDownHistory, color: "#2ed573", max: Math.max(...netDownHistory, 100), label: "↓ Download", unit: " KB/s", formatValue: formatNetSpeed })}
               />
             )}
             {netUpHistory.length > 2 && (
               <Sparkline
-                data={netUpHistory}
-                color="#ffa502"
+                data={netUpHistory} color="#ffa502"
                 max={Math.max(...netUpHistory, 100)}
-                label="↑ Upload"
-                unit=" KB/s"
-                formatValue={formatNetSpeed}
+                label="↑ Upload" unit=" KB/s" formatValue={formatNetSpeed}
+                onExpand={() => setExpandedGraph({ data: netUpHistory, color: "#ffa502", max: Math.max(...netUpHistory, 100), label: "↑ Upload", unit: " KB/s", formatValue: formatNetSpeed })}
+              />
+            )}
+            {diskReadHistory.length > 2 && (
+              <Sparkline
+                data={diskReadHistory} color="#38bdf8"
+                max={Math.max(...diskReadHistory, 1024)}
+                label="Disk Read" unit=" B/s" formatValue={formatDiskSpeed}
+                onExpand={() => setExpandedGraph({ data: diskReadHistory, color: "#38bdf8", max: Math.max(...diskReadHistory, 1024), label: "Disk Read", unit: " B/s", formatValue: formatDiskSpeed })}
+              />
+            )}
+            {diskWriteHistory.length > 2 && (
+              <Sparkline
+                data={diskWriteHistory} color="#fb923c"
+                max={Math.max(...diskWriteHistory, 1024)}
+                label="Disk Write" unit=" B/s" formatValue={formatDiskSpeed}
+                onExpand={() => setExpandedGraph({ data: diskWriteHistory, color: "#fb923c", max: Math.max(...diskWriteHistory, 1024), label: "Disk Write", unit: " B/s", formatValue: formatDiskSpeed })}
               />
             )}
           </div>
@@ -732,6 +974,19 @@ export default function Dashboard() {
           )}
         </div>
       </section>
+
+      {/* Expanded Sparkline Modal */}
+      {expandedGraph && (
+        <ExpandedSparkline
+          data={expandedGraph.data}
+          color={expandedGraph.color}
+          max={expandedGraph.max}
+          label={expandedGraph.label}
+          unit={expandedGraph.unit}
+          formatValue={expandedGraph.formatValue}
+          onClose={() => setExpandedGraph(null)}
+        />
+      )}
     </div>
   );
 }

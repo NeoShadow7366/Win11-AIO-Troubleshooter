@@ -65,6 +65,9 @@ pub async fn get_app_insights(
                         path: p.exe().map(|e| e.to_string_lossy().to_string()),
                         disk_read_bytes: disk.read_bytes,
                         disk_write_bytes: disk.written_bytes,
+                        parent_pid: p.parent().map(|pp| pp.as_u32()),
+                        net_bytes_sent: 0,
+                        net_bytes_recv: 0,
                     });
                 }
             }

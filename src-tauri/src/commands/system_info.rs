@@ -29,6 +29,20 @@ pub struct SystemStats {
     pub external_ip: String,
     pub net_rx_bytes: u64,
     pub net_tx_bytes: u64,
+    pub gpu_usage: Option<f32>,
+    pub gpu_memory_used: Option<u64>,
+    pub gpu_memory_total: Option<u64>,
+    pub cpu_speed_mhz: Option<u32>,
+    pub disk_read_bytes: u64,
+    pub disk_write_bytes: u64,
+    pub ram_available: u64,
+    pub swap_used: u64,
+    pub swap_total: u64,
+    pub ram_cached: Option<u64>,
+    pub ram_committed: Option<u64>,
+    pub ram_commit_limit: Option<u64>,
+    pub ram_paged_pool: Option<u64>,
+    pub ram_non_paged_pool: Option<u64>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -62,6 +76,128 @@ fn get_cached_external_ip() -> String {
     }
 }
 
+// ─── GPU Data Cache (refresh every 2 seconds) ───
+
+#[derive(Debug, Clone, Default)]
+struct GpuData {
+    gpu_usage: Option<f32>,
+    gpu_memory_used: Option<u64>,
+    gpu_memory_total: Option<u64>,
+}
+
+static GPU_CACHE: OnceLock<Mutex<(GpuData, Instant)>> = OnceLock::new();
+
+fn get_cached_gpu_data() -> GpuData {
+    let cache = GPU_CACHE.get_or_init(|| {
+        Mutex::new((GpuData::default(), Instant::now() - std::time::Duration::from_secs(10)))
+    });
+
+    let mut guard = cache.lock().unwrap_or_else(|e| e.into_inner());
+    if guard.1.elapsed().as_secs() >= 2 {
+        let result = run_powershell(
+            r#"try { $nv = (nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total --format=csv,noheader,nounits 2>$null); if($nv) { $parts = $nv.Trim().Split(','); [PSCustomObject]@{GpuUsage=[float]$parts[0].Trim(); MemUsed=[uint64]$parts[1].Trim(); MemTotal=[uint64]$parts[2].Trim()} | ConvertTo-Json } else { '{}' } } catch { '{}' }"#,
+        )
+        .unwrap_or_else(|_| "{}".to_string());
+
+        let data = if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&result) {
+            GpuData {
+                gpu_usage: parsed.get("GpuUsage").and_then(|v| v.as_f64()).map(|v| v as f32),
+                gpu_memory_used: parsed.get("MemUsed").and_then(|v| v.as_u64()),
+                gpu_memory_total: parsed.get("MemTotal").and_then(|v| v.as_u64()),
+            }
+        } else {
+            GpuData::default()
+        };
+
+        *guard = (data.clone(), Instant::now());
+        data
+    } else {
+        guard.0.clone()
+    }
+}
+
+// ─── Disk I/O Cache (refresh every 2 seconds) ───
+
+#[derive(Debug, Clone, Default)]
+struct DiskIoData {
+    read: u64,
+    write: u64,
+}
+
+static DISK_IO_CACHE: OnceLock<Mutex<(DiskIoData, Instant)>> = OnceLock::new();
+
+fn get_cached_disk_io() -> DiskIoData {
+    let cache = DISK_IO_CACHE.get_or_init(|| {
+        Mutex::new((DiskIoData::default(), Instant::now() - std::time::Duration::from_secs(10)))
+    });
+
+    let mut guard = cache.lock().unwrap_or_else(|e| e.into_inner());
+    if guard.1.elapsed().as_secs() >= 2 {
+        let result = run_powershell(
+            r#"try { $c = (Get-Counter '\PhysicalDisk(_Total)\Disk Read Bytes/sec','\PhysicalDisk(_Total)\Disk Write Bytes/sec' -ErrorAction SilentlyContinue).CounterSamples; [PSCustomObject]@{Read=[uint64]$c[0].CookedValue; Write=[uint64]$c[1].CookedValue} | ConvertTo-Json } catch { '{}' }"#,
+        )
+        .unwrap_or_else(|_| "{}".to_string());
+
+        let data = if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&result) {
+            DiskIoData {
+                read: parsed.get("Read").and_then(|v| v.as_u64()).unwrap_or(0),
+                write: parsed.get("Write").and_then(|v| v.as_u64()).unwrap_or(0),
+            }
+        } else {
+            DiskIoData::default()
+        };
+
+        *guard = (data.clone(), Instant::now());
+        data
+    } else {
+        guard.0.clone()
+    }
+}
+
+// ─── Memory Composition Cache (refresh every 5 seconds) ───
+
+#[derive(Debug, Clone, Default)]
+struct MemoryComposition {
+    cached: Option<u64>,
+    committed: Option<u64>,
+    commit_limit: Option<u64>,
+    paged_pool: Option<u64>,
+    non_paged_pool: Option<u64>,
+}
+
+static MEMORY_COMP_CACHE: OnceLock<Mutex<(MemoryComposition, Instant)>> = OnceLock::new();
+
+fn get_cached_memory_composition() -> MemoryComposition {
+    let cache = MEMORY_COMP_CACHE.get_or_init(|| {
+        Mutex::new((MemoryComposition::default(), Instant::now() - std::time::Duration::from_secs(10)))
+    });
+
+    let mut guard = cache.lock().unwrap_or_else(|e| e.into_inner());
+    if guard.1.elapsed().as_secs() >= 5 {
+        let result = run_powershell(
+            r#"try { $os = Get-CimInstance Win32_OperatingSystem; $mem = Get-Counter '\Memory\Cache Bytes','\Memory\Pool Paged Bytes','\Memory\Pool Nonpaged Bytes','\Memory\Committed Bytes','\Memory\Commit Limit' -ErrorAction SilentlyContinue; [PSCustomObject]@{Cached=[uint64]$mem.CounterSamples[0].CookedValue; PagedPool=[uint64]$mem.CounterSamples[1].CookedValue; NonPagedPool=[uint64]$mem.CounterSamples[2].CookedValue; Committed=[uint64]$mem.CounterSamples[3].CookedValue; CommitLimit=[uint64]$mem.CounterSamples[4].CookedValue} | ConvertTo-Json } catch { '{}' }"#,
+        )
+        .unwrap_or_else(|_| "{}".to_string());
+
+        let data = if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&result) {
+            MemoryComposition {
+                cached: parsed.get("Cached").and_then(|v| v.as_u64()),
+                committed: parsed.get("Committed").and_then(|v| v.as_u64()),
+                commit_limit: parsed.get("CommitLimit").and_then(|v| v.as_u64()),
+                paged_pool: parsed.get("PagedPool").and_then(|v| v.as_u64()),
+                non_paged_pool: parsed.get("NonPagedPool").and_then(|v| v.as_u64()),
+            }
+        } else {
+            MemoryComposition::default()
+        };
+
+        *guard = (data.clone(), Instant::now());
+        data
+    } else {
+        guard.0.clone()
+    }
+}
+
 /// Returns live system statistics: CPU usage, RAM, per-disk info, and IP addresses.
 /// Uses shared System state — no sleep needed since the frontend polls every 2 seconds,
 /// providing a natural delta between refreshes.
@@ -73,7 +209,7 @@ pub async fn get_system_stats(
 
     tokio::task::spawn_blocking(move || {
         // Lock, refresh, extract CPU/RAM, then drop the lock quickly
-        let (cpu_usage, per_core_usage, ram_used, ram_total) = {
+        let (cpu_usage, per_core_usage, ram_used, ram_total, ram_available, swap_used, swap_total) = {
             let mut sys = sys_arc.lock().unwrap_or_else(|e| e.into_inner());
             sys.refresh_cpu_usage();
             sys.refresh_memory();
@@ -82,6 +218,9 @@ pub async fn get_system_stats(
                 sys.cpus().iter().map(|c| c.cpu_usage()).collect::<Vec<f32>>(),
                 sys.used_memory(),
                 sys.total_memory(),
+                sys.available_memory(),
+                sys.used_swap(),
+                sys.total_swap(),
             )
         };
 
@@ -148,6 +287,21 @@ pub async fn get_system_stats(
             net_tx += data.total_transmitted();
         }
 
+        // GPU usage (cached — refreshes every 2 seconds)
+        let gpu_data = get_cached_gpu_data();
+
+        // CPU clock speed (MHz)
+        let cpu_speed_mhz = {
+            let sys = sys_arc.lock().unwrap_or_else(|e| e.into_inner());
+            sys.cpus().first().map(|c| c.frequency() as u32)
+        };
+
+        // Disk I/O rates (cached — refreshes every 2 seconds)
+        let disk_io = get_cached_disk_io();
+
+        // Memory composition (cached — refreshes every 5 seconds)
+        let mem_comp = get_cached_memory_composition();
+
         Ok(SystemStats {
             cpu_usage,
             per_core_usage,
@@ -160,6 +314,20 @@ pub async fn get_system_stats(
             external_ip,
             net_rx_bytes: net_rx,
             net_tx_bytes: net_tx,
+            gpu_usage: gpu_data.gpu_usage,
+            gpu_memory_used: gpu_data.gpu_memory_used,
+            gpu_memory_total: gpu_data.gpu_memory_total,
+            cpu_speed_mhz,
+            disk_read_bytes: disk_io.read,
+            disk_write_bytes: disk_io.write,
+            ram_available,
+            swap_used,
+            swap_total,
+            ram_cached: mem_comp.cached,
+            ram_committed: mem_comp.committed,
+            ram_commit_limit: mem_comp.commit_limit,
+            ram_paged_pool: mem_comp.paged_pool,
+            ram_non_paged_pool: mem_comp.non_paged_pool,
         })
     })
     .await
@@ -220,6 +388,23 @@ pub async fn get_system_specs(
             uptime,
             hostname,
         })
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+}
+
+/// Returns the last BIOS time in seconds (time from power-on to OS handoff)
+#[tauri::command]
+pub async fn get_last_bios_time() -> Result<f64, String> {
+    tokio::task::spawn_blocking(|| {
+        let script = r#"try { $ev = Get-WinEvent -FilterHashtable @{LogName='System';ID=27;ProviderName='Microsoft-Windows-Diagnostics-Performance'} -MaxEvents 1 -ErrorAction SilentlyContinue; if($ev) { ($ev.Properties[0].Value / 1000) } else { $b = (Get-CimInstance Win32_OperatingSystem).LastBootUpTime; (New-TimeSpan -Start $b -End (Get-Date)).TotalSeconds } } catch { -1 }"#;
+        match run_powershell(script) {
+            Ok(output) => {
+                let trimmed = output.trim();
+                trimmed.parse::<f64>().map_err(|e| format!("Parse error: {} (raw: {})", e, trimmed))
+            }
+            Err(e) => Err(format!("PowerShell error: {}", e)),
+        }
     })
     .await
     .map_err(|e| format!("Task join error: {}", e))?

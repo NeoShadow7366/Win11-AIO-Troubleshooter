@@ -1,4 +1,5 @@
 pub mod admin;
+pub mod app_history;
 pub mod app_insights;
 pub mod bsod_analyzer;
 pub mod cli_tools;
@@ -19,4 +20,5 @@ pub mod services;
 pub mod startup_manager;
 pub mod system_info;
 pub mod task_scheduler;
+pub mod users;
 pub mod windows_update;

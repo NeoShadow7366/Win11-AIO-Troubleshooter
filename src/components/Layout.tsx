@@ -28,6 +28,8 @@ const InstalledPrograms = React.lazy(() => import("./InstalledPrograms"));
 const DiskAnalyzer = React.lazy(() => import("./DiskAnalyzer"));
 const FirewallViewer = React.lazy(() => import("./FirewallViewer"));
 const WindowsUpdate = React.lazy(() => import("./WindowsUpdate"));
+const UsersPage = React.lazy(() => import("./UsersPage"));
+const AppHistory = React.lazy(() => import("./AppHistory"));
 
 /* ─── Admin Context ─── */
 interface AdminContextType {
@@ -210,11 +212,13 @@ const PAGE_TITLES: Record<string, string> = {
   diskanalyzer:    "Disk Analyzer",
   firewall:        "Firewall Rules",
   windowsupdate:   "Windows Update",
+  users:           "Users",
+  apphistory:      "App History",
 };
 
 const PAGE_DESCRIPTIONS: Record<string, string> = {
-  dashboard:       "Overview of your system's health. Monitor real-time CPU, RAM, and disk usage with live sparkline graphs. The health score aggregates key metrics into a 0–100 rating with per-category breakdowns.",
-  processes:       "View all running processes with CPU and memory usage. Click any process row to open a detail panel showing PID, path, threads, start time, and more. Use the star icon to favorite processes for quick tracking. Kill processes with the trash icon (requires confirmation). Toggle auto-refresh on/off.",
+  dashboard:       "Overview of your system's health. Monitor real-time CPU, RAM, GPU, and disk usage with live sparkline graphs (click any to expand). GPU gauge and CPU clock speed display. Memory composition bar showing used, cached, paged pool, and available memory. Extended 120-point history. The health score aggregates key metrics into a 0–100 rating with per-category breakdowns.",
+  processes:       "View all running processes with CPU, memory, and disk I/O. Click any process to open a detail panel with PID, path, threads, start time, CPU Affinity editor, loaded DLLs inspector, VirusTotal hash scanner, and network connections viewer. End process trees, suspend/resume processes, and set efficiency mode. Toggle tree view, group by app name, or customize visible columns. Export to CSV. Star processes as favorites.",
   services:        "Manage Windows services. Start, stop, or restart services. Change startup type between Automatic, Manual, and Disabled. Click a service row to see its details in a side panel. Some actions require administrator privileges.",
   eventviewer:     "Browse Windows event logs (System, Application, Security). Use preset date ranges (Today, 7 Days, 30 Days) or set a custom range. Filter by source name and severity level (Critical, Error, Warning). Click any row to expand its full message.",
   appinsights:     "Browse all running applications grouped by name. Click any app to open a detail panel showing its running processes, related event logs, executable path, and install directory. Use the search bar to filter. Star apps as favorites. Click 'View in Processes' to jump to the Process Manager.",
@@ -222,9 +226,9 @@ const PAGE_DESCRIPTIONS: Record<string, string> = {
   quicktools:      "Run system maintenance and diagnostic tools. Select a tool from the categorized list (Repair, Network, Performance, Security, Diagnostics), read its description, then click Run. Output streams in real-time to the terminal below. Use PC Health Check to run a full automated routine.",
   bsod:            "Analyze Blue Screen of Death (BSOD) crash dumps. Click a minidump file to see its analysis: bug check code, faulting module, and parameters. Click BSOD history entries to open a detail panel with error info and a 'Search Web for Fix' button for troubleshooting. Requires admin to access crash data.",
   hardware:        "Monitor hardware health: CPU temperatures, GPU stats (NVIDIA), memory modules, and disk S.M.A.R.T. data including wear level and power-on hours. Data auto-refreshes every 5 seconds. Some sensors require administrator privileges.",
-  startup:         "Manage programs that start automatically with Windows. Toggle items on/off from Registry, Startup Folder, and Scheduled Tasks. View color-coded startup impact ratings (High, Medium, Low). Use 'What is this?' to look up unknown entries. HKLM and scheduled task changes require admin.",
+  startup:         "Manage programs that start automatically with Windows. Toggle items on/off from Registry, Startup Folder, and Scheduled Tasks. View color-coded startup impact ratings (High, Medium, Low). Last BIOS time displayed in the header. Use 'What is this?' to look up unknown entries. HKLM and scheduled task changes require admin.",
   network:         "Network diagnostic tools: view active TCP connections with process names, run ping and traceroute tests, perform DNS lookups, and check WiFi signal info. Use the tabs to switch between tools.",
-  settings:        "Configure application preferences including refresh intervals, default network settings, theme, and more.",
+  settings:        "Configure application preferences including refresh intervals, theme, process auto-refresh, system tray behavior (minimize to tray on close), notification alert thresholds for CPU/RAM, and network defaults.",
   restorepoints:   "View and manage Windows System Restore points. See existing restore points with creation dates and types. Create new restore points or restore your system to a previous state. Requires administrator privileges.",
   drivers:         "View all installed device drivers. Filter by device class or status. See driver version, signing status, and identify problem devices. Click any driver for detailed information.",
   taskscheduler:   "Browse and manage all Windows scheduled tasks. Filter by state and trigger type. Enable/disable tasks, run them on demand, and view last run results. Requires administrator for modifications.",
@@ -232,6 +236,8 @@ const PAGE_DESCRIPTIONS: Record<string, string> = {
   diskanalyzer:    "Analyze disk space usage across your drives. Visual treemap shows space distribution. Drill down into folders to find large files. Navigate with breadcrumbs.",
   firewall:        "View Windows Firewall inbound and outbound rules. Filter by direction, action, and enabled state. See port, protocol, and program details for each rule.",
   windowsupdate:   "View Windows Update history and check for pending updates. See installation status, KB articles, and support links. Filter by status.",
+  users:           "View all logged-in user sessions with their CPU, memory, and process usage. See session status, logon times, and sign out users. Auto-refreshes every 5 seconds.",
+  apphistory:      "View per-application resource usage aggregated from all running processes. Summary stat cards for total apps, CPU, memory, and disk I/O. Sortable table with search filter and auto-refresh every 10 seconds.",
 };
 
 const PAGE_COMPONENTS: Record<string, React.ComponentType> = {
@@ -254,6 +260,8 @@ const PAGE_COMPONENTS: Record<string, React.ComponentType> = {
   diskanalyzer: DiskAnalyzer,
   firewall: FirewallViewer,
   windowsupdate: WindowsUpdate,
+  users: UsersPage,
+  apphistory: AppHistory,
 };
 
 /* ─── Page Loading Fallback ─── */

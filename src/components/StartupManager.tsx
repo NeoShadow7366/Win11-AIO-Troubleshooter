@@ -15,6 +15,7 @@ import {
   CheckCircle2,
   XCircle,
   Gauge,
+  Timer,
 } from "lucide-react";
 
 // ─── Types ───
@@ -176,6 +177,7 @@ export default function StartupManager() {
   const [search, setSearch] = useState("");
   const { isAdmin, promptAdmin } = useAdmin();
   const { showToast } = useToast();
+  const [biosTime, setBiosTime] = useState<number | null>(null);
 
   const fetchItems = useCallback(async () => {
     setLoading(true);
@@ -191,6 +193,10 @@ export default function StartupManager() {
 
   useEffect(() => {
     fetchItems();
+    // Fetch Last BIOS Time
+    invoke<number>("get_last_bios_time").then((t) => {
+      if (t > 0 && t < 600) setBiosTime(t);
+    }).catch(() => {});
   }, [fetchItems]);
 
   const handleToggle = async (item: StartupItem) => {
@@ -247,6 +253,43 @@ export default function StartupManager() {
     }
   };
 
+  /** Extract the directory portion from a startup command string */
+  const getDirectoryFromCommand = (command: string): string | null => {
+    let exePath = command.trim();
+    if (exePath.startsWith('"')) {
+      // Quoted path: extract content between first pair of quotes
+      const closingQuote = exePath.indexOf('"', 1);
+      if (closingQuote !== -1) {
+        exePath = exePath.substring(1, closingQuote);
+      } else {
+        exePath = exePath.substring(1);
+      }
+    } else {
+      // Unquoted: take everything up to the first space (or the whole string)
+      const spaceIdx = exePath.indexOf(' ');
+      if (spaceIdx !== -1) {
+        exePath = exePath.substring(0, spaceIdx);
+      }
+    }
+    // Get directory (everything up to the last backslash)
+    const lastSlash = Math.max(exePath.lastIndexOf('\\'), exePath.lastIndexOf('/'));
+    if (lastSlash <= 0) return null;
+    return exePath.substring(0, lastSlash);
+  };
+
+  const handleOpenFileLocation = async (command: string) => {
+    const folderPath = getDirectoryFromCommand(command);
+    if (!folderPath) {
+      showToast("Could not determine file location", "error");
+      return;
+    }
+    try {
+      await invoke('open_path_in_explorer', { path: folderPath });
+    } catch (err) {
+      showToast("Failed to open file location", "error");
+    }
+  };
+
   const searchTerm = search.toLowerCase();
   const filtered = items.filter((item) => {
     if (filterSource !== "all" && item.source !== filterSource) return false;
@@ -283,6 +326,19 @@ export default function StartupManager() {
         </div>
         <span className="text-[12px] text-white/20">•</span>
         <span className="text-[12px] text-white/30">{items.length} total</span>
+
+        {/* Last BIOS Time */}
+        {biosTime !== null && (
+          <>
+            <span className="text-[12px] text-white/20">•</span>
+            <div className="flex items-center gap-1.5">
+              <Timer className="w-3.5 h-3.5 text-accent/50" />
+              <span className="text-[12px] text-white/50 font-medium">
+                Last BIOS time: <span className="text-accent/70 font-bold tabular-nums">{biosTime.toFixed(1)}s</span>
+              </span>
+            </div>
+          </>
+        )}
 
         <div className="flex-1" />
 
@@ -371,7 +427,7 @@ export default function StartupManager() {
           <div className="w-14 text-center">Impact</div>
           <div className="w-36">Publisher</div>
           <div className="flex-1 min-w-0">Command</div>
-          <div className="w-10" />
+          <div className="w-[4.5rem]" />
         </div>
 
         {/* Rows */}
@@ -443,7 +499,18 @@ export default function StartupManager() {
                   </div>
 
                   {/* Actions */}
-                  <div className="w-10 shrink-0 flex justify-end">
+                  <div className="w-[4.5rem] shrink-0 flex justify-end gap-1">
+                    {item.command && (
+                      <button
+                        onClick={() => handleOpenFileLocation(item.command!)}
+                        className="flex items-center justify-center w-7 h-7 rounded-md
+                                   text-white/20 hover:text-accent hover:bg-accent/10
+                                   transition-all duration-200"
+                        title="Open file location"
+                      >
+                        <FolderOpen className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                     <button
                       onClick={() => handleWhatIsThis(item.name)}
                       className="flex items-center justify-center w-7 h-7 rounded-md
